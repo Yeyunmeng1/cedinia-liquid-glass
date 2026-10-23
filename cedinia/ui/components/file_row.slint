@@ -1,0 +1,239 @@
+// 液态玻璃列表行
+//
+// 结构修复（v2）：
+//   上一版第一个子元素是"水光高亮"矩形，Slint 会把它当成组件根节点，
+//   后续 TouchArea / 内容全变成它的子元素，且 parent.height 取到的是
+//   ListView 的高度而非行高 —— 高亮块会糊满整屏。
+//   这一版显式加了一层铺满的根矩形，高亮退化为普通子元素。
+//
+// 功能回调与属性名保持不变（is_last 为纯视觉开关）。
+
+import { Fonts } from "../globals/fonts.slint";
+import { CediniaColors } from "../globals/colors.slint";
+import { FileEntryIdx } from "../globals/common.slint";
+
+export component FileRow {
+    in property <string>  name;
+    in property <string>  path;
+    in property <string>  size;
+    in property <[string]> val_str: [];
+    in property <bool>    checked: false;
+    in property <bool>    is_header: false;
+    in property <bool>    is_reference: false;
+    in property <bool>    is_even: false;
+    in property <bool>    extra_as_line2: false;
+    in property <bool>    is_last: false;
+
+    callback toggle_checked();
+    callback long_pressed();
+    callback open_item();
+    callback open_parent();
+
+    property <bool> lp_fired: false;
+    property <bool> _moved: false;
+    property <bool> _lp_active: false;
+    property <length> _lp_start_x: 0px;
+    property <length> _lp_start_y: 0px;
+
+    property <bool> _ta_pressed_watch: ta.pressed;
+    changed _ta_pressed_watch => {
+        if (!_ta_pressed_watch) {
+            root._lp_active = false;
+            lp_timer.running = false;
+        }
+    }
+
+    height: root.is_header ? 40px
+          : root.extra_as_line2 ? 80px
+          : 68px;
+
+    // ── 显式根节点：铺满整行 ──
+    Rectangle {
+        width: root.width;
+        height: root.height;
+
+        // 选中 / 按下的水光高亮（普通子元素）
+        Rectangle {
+            x: 8px;
+            y: 3px;
+            width: parent.width - 16px;
+            height: parent.height - 6px;
+            border-radius: 16px;
+            background: root.checked
+                ? CediniaColors.row_selected
+                : ta.pressed ? CediniaColors.fill_tertiary : transparent;
+            opacity: (root.checked || ta.pressed) ? 1.0 : 0.0;
+            animate opacity { duration: 180ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
+            animate background { duration: 180ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
+        }
+
+        ta := TouchArea {
+            clicked => {
+                if (root.lp_fired) {
+                    root.lp_fired = false;
+                } else if (!root._moved && !root.is_header && !root.is_reference) {
+                    root.toggle_checked();
+                }
+                root._moved = false;
+            }
+            pointer-event(e) => {
+                if (!root.is_header) {
+                    if (e.kind == PointerEventKind.down) {
+                        root._lp_start_x = self.mouse-x;
+                        root._lp_start_y = self.mouse-y;
+                        root._moved    = false;
+                        root._lp_active = true;
+                        lp_timer.running = true;
+                        lp_timer.restart();
+                    } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                        root._lp_active = false;
+                        lp_timer.running = false;
+                        if (e.kind == PointerEventKind.cancel) { root._moved = true; }
+                    }
+                    if (e.button == PointerEventButton.middle && e.kind == PointerEventKind.up) {
+                        root.open_item();
+                    }
+                    if (e.button == PointerEventButton.right && e.kind == PointerEventKind.up) {
+                        root.open_parent();
+                    }
+                }
+            }
+            moved => {
+                if (!root.is_header) {
+                    if (self.mouse-x - root._lp_start_x > 8px
+                            || root._lp_start_x - self.mouse-x > 8px
+                            || self.mouse-y - root._lp_start_y > 8px
+                            || root._lp_start_y - self.mouse-y > 8px) {
+                        root._lp_active = false;
+                        lp_timer.running = false;
+                        root._moved = true;
+                    }
+                }
+            }
+        }
+
+        lp_timer := Timer {
+            interval: 500ms;
+            running: false;
+            triggered => {
+                self.running = false;
+                if (!root._lp_active) { return; }
+                root._lp_active = false;
+                root.lp_fired = true;
+                root.long_pressed();
+            }
+        }
+
+        // ── 组标题 ──
+        if root.is_header : HorizontalLayout {
+            padding-left: 22px;
+            padding-right: 18px;
+            padding-top: 18px;
+            alignment: LayoutAlignment.start;
+            Text {
+                text: root.name;
+                color: CediniaColors.text_secondary;
+                font-size: Fonts.footnote;
+                font-weight: Fonts.semibold;
+                vertical-alignment: TextVerticalAlignment.center;
+                overflow: elide;
+            }
+        }
+
+        // ── 数据行 ──
+        if !root.is_header : HorizontalLayout {
+            padding-left: 18px;
+            padding-right: 18px;
+            spacing: 12px;
+
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                border-radius: 10px;
+                vertical-stretch: 0.0;
+                background: root.is_reference
+                    ? CediniaColors.fill_secondary
+                    : root.checked ? CediniaColors.accent : transparent;
+                border-width: root.is_reference ? 0px : 1.5px;
+                border-color: root.checked ? CediniaColors.accent : CediniaColors.chevron;
+                animate background { duration: 180ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
+                animate border-color { duration: 180ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
+
+                if root.checked : Text {
+                    text: "✓";
+                    color: #ffffff;
+                    font-size: 12px;
+                    font-weight: Fonts.bold;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+                if root.is_reference : Text {
+                    text: "R";
+                    color: CediniaColors.text_secondary;
+                    font-size: 10px;
+                    font-weight: Fonts.bold;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    vertical-alignment: TextVerticalAlignment.center;
+                }
+            }
+
+            VerticalLayout {
+                alignment: LayoutAlignment.center;
+                spacing: 2px;
+                horizontal-stretch: 1.0;
+
+                Text {
+                    text: root.name;
+                    color: root.is_reference ? CediniaColors.text_secondary : CediniaColors.text_primary;
+                    font-size: Fonts.body;
+                    font-weight: Fonts.regular;
+                    overflow: elide;
+                    wrap: no-wrap;
+                }
+                if !root.extra_as_line2 : Text {
+                    text: root.path;
+                    color: CediniaColors.text_secondary;
+                    font-size: Fonts.footnote;
+                    wrap: word-wrap;
+                }
+                if root.extra_as_line2 && root.path != "" : Text {
+                    text: root.path;
+                    color: CediniaColors.text_secondary;
+                    font-size: Fonts.footnote;
+                    overflow: elide;
+                    wrap: no-wrap;
+                }
+                if !root.extra_as_line2 && root.val_str.length > FileEntryIdx.extra_idx && root.val_str[FileEntryIdx.extra_idx] != "" : Text {
+                    text: root.val_str[FileEntryIdx.extra_idx];
+                    color: CediniaColors.text_disabled;
+                    font-size: Fonts.footnote;
+                    overflow: elide;
+                    wrap: no-wrap;
+                }
+                if root.extra_as_line2 && root.val_str.length > FileEntryIdx.extra_idx && root.val_str[FileEntryIdx.extra_idx] != "" : Text {
+                    text: root.val_str[FileEntryIdx.extra_idx];
+                    color: CediniaColors.text_disabled;
+                    font-size: Fonts.footnote;
+                    wrap: word-wrap;
+                }
+            }
+
+            Text {
+                text: root.size;
+                color: CediniaColors.text_secondary;
+                font-size: Fonts.subhead;
+                vertical-alignment: TextVerticalAlignment.center;
+                horizontal-alignment: TextHorizontalAlignment.right;
+                min-width: 56px;
+            }
+        }
+
+        if !root.is_header && !root.is_last : Rectangle {
+            y: parent.height - 1px;
+            x: 56px;
+            width: parent.width - 56px - 16px;
+            height: 1px;
+            background: CediniaColors.separator_inset;
+        }
+    }
+}

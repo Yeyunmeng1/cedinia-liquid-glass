@@ -1,0 +1,105 @@
+// 导航栏（连续 bar，非悬浮岛）
+//
+// Apple 2026 版对 Liquid Glass 的修正之一：
+// "one continuous bar rather than floating islands"（连续统一的 bar，不是漂浮孤岛）。
+// 所以这里不做左右留白的胶囊，而是横贯屏幕的一条玻璃带。
+
+import { Fonts } from "../globals/fonts.slint";
+import { CediniaColors } from "../globals/colors.slint";
+import { AppState } from "../globals/app_state.slint";
+import { ScanState } from "../globals/common.slint";
+
+export component TopAppBar {
+    in property <string> title: "Cedinia";
+
+    height: AppState.status_message == "" ? 44px : 56px;
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: CediniaColors.nav_bg;
+
+
+        // ── 玻璃描边环（.glass::before 的 135° 渐变）──
+        Rectangle {
+            x: 0; y: 0;
+            width: parent.width; height: 1px;
+            background: @linear-gradient(90deg, #ffffffe6 0%, #ffffff24 100%);
+        }
+        Rectangle {
+            x: 0; y: parent.height - 1px;
+            width: parent.width; height: 1px;
+            background: @linear-gradient(90deg, #ffffff24 0%, #ffffff8c 100%);
+        }
+        Rectangle {
+            x: 0; y: 0;
+            width: 1px; height: parent.height;
+            background: @linear-gradient(180deg, #ffffffe6 0%, #ffffff24 100%);
+        }
+        Rectangle {
+            x: parent.width - 1px; y: 0;
+            width: 1px; height: parent.height;
+            background: @linear-gradient(180deg, #ffffff24 0%, #ffffff8c 100%);
+        }
+
+        // 内侧渐变过渡带
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: 22px;
+            background: @linear-gradient(180deg, CediniaColors.glass_top_glint 0%, transparent 100%);
+        }
+
+        VerticalLayout {
+            alignment: LayoutAlignment.center;
+            spacing: 1px;
+
+            HorizontalLayout {
+                alignment: LayoutAlignment.center;
+                spacing: 6px;
+
+                Text {
+                    text: root.title;
+                    color: CediniaColors.text_primary;
+                    font-size: Fonts.headline;
+                    font-weight: Fonts.semibold;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    vertical-alignment: TextVerticalAlignment.center;
+                    overflow: elide;
+                }
+
+                // 扫描中：一颗呼吸的小蓝点
+                if AppState.scan_state == ScanState.Scanning : Rectangle {
+                    width: 6px;
+                    height: 6px;
+                    border-radius: 3px;
+                    background: CediniaColors.accent;
+                    vertical-stretch: 0.0;
+                    animate opacity {
+                        duration: 1400ms;
+                        iteration-count: -1;
+                        easing: ease-in-out;
+                    }
+                }
+            }
+
+            if AppState.status_message != "" : Text {
+                text: AppState.status_message;
+                color: CediniaColors.text_secondary;
+                font-size: Fonts.caption_2;
+                horizontal-alignment: TextHorizontalAlignment.center;
+                overflow: elide;
+            }
+        }
+
+        // 底部 hairline
+        Rectangle {
+            x: 0;
+            y: parent.height - 1px;
+            width: parent.width;
+            height: 1px;
+            background: CediniaColors.bar_border;
+        }
+    }
+}

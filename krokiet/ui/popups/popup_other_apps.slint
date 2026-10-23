@@ -1,0 +1,134 @@
+import { Button, ScrollView } from "std-widgets.slint";
+import { ColorPalette } from "../globals/color_palette.slint";
+import { Callabler } from "../globals/callabler.slint";
+import { Translations } from "../globals/translations.slint";
+import { FontSizes } from "../globals/fonts.slint";
+
+struct OtherApp {
+    name: string,
+    url: string,
+}
+
+component AppRow inherits Rectangle {
+    in property <OtherApp> app;
+    in property <string> description;
+
+    height: layout.preferred-height;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: ColorPalette.popup_border_color;
+    background: transparent;
+
+    layout := HorizontalLayout {
+        padding: 10px;
+        spacing: 10px;
+
+        VerticalLayout {
+            horizontal-stretch: 1.0;
+            spacing: 2px;
+
+            Text {
+                text: root.app.name;
+                font-size: FontSizes.normal;
+                font-weight: FontSizes.bold_weight;
+            }
+
+            Text {
+                text: root.description;
+                font-size: FontSizes.small;
+                wrap: word-wrap;
+            }
+        }
+
+        Button {
+            text <=> Translations.other_apps_open_button_text;
+            clicked => {
+                Callabler.open_link(root.app.url);
+            }
+        }
+    }
+}
+
+export component PopupOtherApps inherits Rectangle {
+    callback show_popup();
+
+    private property <length> popup_width: 520px;
+    private property <length> popup_height: 420px;
+
+    property <[OtherApp]> apps: [
+        { name: "Szyszka",               url: "https://github.com/qarmin/szyszka" },
+        { name: "Mykrut",                url: "https://github.com/qarmin/mykrut" },
+        { name: "Dcmki Viewer",          url: "https://github.com/qarmin/dcmki_viewer" },
+        { name: "Video Thumbnailer",     url: "https://github.com/qarmin/video_thumbnailer" },
+        { name: "Space Finder",          url: "https://github.com/qarmin/space_finder" },
+        { name: "System Info Collector", url: "https://github.com/qarmin/system-info-collector" },
+    ];
+
+    popup_window := PopupWindow {
+        width: popup_width;
+        height: popup_height;
+        x: (parent.width - popup_width) / 2.0;
+        y: (parent.height - self.height) / 2.0;
+        close-policy: PopupClosePolicy.no-auto-close;
+
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            border-radius: 10px;
+            border-color: ColorPalette.popup_border_color;
+            border-width: 2px;
+            background: ColorPalette.popup_background;
+            clip: true;
+
+            VerticalLayout {
+                Rectangle {
+                    background: ColorPalette.popup_background_title_line;
+                    VerticalLayout {
+                        padding: 6px;
+                        spacing: 2px;
+                        Text {
+                            text <=> Translations.other_apps_title_text;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                            font-size: FontSizes.normal;
+                        }
+                        Text {
+                            text <=> Translations.other_apps_open_source_note_text;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                            font-size: FontSizes.small;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                ScrollView {
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 8px;
+
+                        for app[idx] in root.apps: AppRow {
+                            app: app;
+                            description: Translations.other_apps_descriptions[idx];
+                        }
+
+                        Rectangle { }
+                    }
+                }
+
+                HorizontalLayout {
+                    padding: 10px;
+                    Rectangle { }
+                    Button {
+                        text <=> Translations.cancel_button_text;
+                        clicked => {
+                            popup_window.close();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    show_popup() => { popup_window.show(); }
+}

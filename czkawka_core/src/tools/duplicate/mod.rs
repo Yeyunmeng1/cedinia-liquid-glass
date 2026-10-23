@@ -1,0 +1,536 @@
+pub mod core;
+#[cfg(test)]
+mod tests;
+pub mod traits;
+
+use std::cell::RefCell;
+use std::collections::BTreeMap;
+use std::fmt::Debug;
+#[cfg(target_family = "unix")]
+use std::fs;
+use std::fs::File;
+use std::hash::Hasher;
+use std::io::SeekFrom;
+use std::io::prelude::*;
+#[cfg(target_family = "unix")]
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
+
+use indexmap::IndexSet;
+use serde::{Deserialize, Serialize};
+use static_assertions::const_assert;
+use xxhash_rust::xxh3::Xxh3;
+
+use crate::common::model::{CheckingMethod, FileEntry, HashType};
+use crate::common::progress_stop_handler::check_if_stop_received;
+use crate::common::tool_data::CommonToolData;
+use crate::common::traits::ResultEntry;
+use crate::flc;
+
+pub const PREHASHING_BUFFER_SIZE: u64 = 4 * 1024;
+pub const THREAD_BUFFER_SIZE: usize = 2 * 1024 * 1024;
+
+thread_local! {
+    static THREAD_BUFFER: RefCell<Vec<u8>> = RefCell::new(vec![0u8; THREAD_BUFFER_SIZE]);
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+pub struct DuplicateEntry {
+    pub path: PathBuf,
+    pub modified_date: u64,
+    pub size: u64,
+    pub hash: String,
+}
+impl ResultEntry for DuplicateEntry {
+    fn get_path(&self) -> &Path {
+        &self.path
+    }
+    fn get_modified_date(&self) -> u64 {
+        self.modified_date
+    }
+    fn get_size(&self) -> u64 {
+        self.size
+    }
+}
+
+impl FileEntry {
+    fn into_duplicate_entry(self) -> DuplicateEntry {
+        DuplicateEntry {
+            size: self.size,
+            path: self.path,
+            modified_date: self.modified_date,
+            hash: String::new(),
+        }
+    }
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct Info {
+    pub number_of_groups_by_size: usize,
+    pub number_of_duplicated_files_by_size: usize,
+    pub number_of_groups_by_hash: usize,
+    pub number_of_duplicated_files_by_hash: usize,
+    pub number_of_groups_by_name: usize,
+    pub number_of_duplicated_files_by_name: usize,
+    pub number_of_groups_by_size_name: usize,
+    pub number_of_duplicated_files_by_size_name: usize,
+    pub lost_space_by_size: u64,
+    pub lost_space_by_hash: u64,
+    pub scanning_time: Duration,
+}
+
+#[derive(Clone)]
+pub struct DuplicateFinderParameters {
+    pub check_method: CheckingMethod,
+    pub hash_type: HashType,
+    pub use_prehash_cache: bool,
+    pub minimal_cache_file_size: u64,
+    pub minimal_prehash_cache_file_size: u64,
+    pub case_sensitive_name_comparison: bool,
+}
+
+impl DuplicateFinderParameters {
+    pub fn new(
+        check_method: CheckingMethod,
+        hash_type: HashType,
+        use_prehash_cache: bool,
+        minimal_cache_file_size: u64,
+        minimal_prehash_cache_file_size: u64,
+        case_sensitive_name_comparison: bool,
+    ) -> Self {
+        Self {
+            check_method,
+            hash_type,
+            use_prehash_cache,
+            minimal_cache_file_size,
+            minimal_prehash_cache_file_size,
+            case_sensitive_name_comparison,
+        }
+    }
+}
+
+pub struct DuplicateFinder {
+    common_data: CommonToolData,
+    information: Info,
+    // File Name, File Entry
+    files_with_identical_names: BTreeMap<String, Vec<DuplicateEntry>>,
+    // File (Size, Name), File Entry
+    files_with_identical_size_names: BTreeMap<(u64, String), Vec<DuplicateEntry>>,
+    // File Size, File Entry
+    files_with_identical_size: BTreeMap<u64, Vec<DuplicateEntry>>,
+    // File Size, next grouped by file size, next grouped by hash
+    files_with_identical_hashes: BTreeMap<u64, Vec<Vec<DuplicateEntry>>>,
+    // File Name, File Entry
+    files_with_identical_names_referenced: BTreeMap<String, (DuplicateEntry, Vec<DuplicateEntry>)>,
+    // File (Size, Name), File Entry
+    files_with_identical_size_names_referenced: BTreeMap<(u64, String), (DuplicateEntry, Vec<DuplicateEntry>)>,
+    // File Size, File Entry
+    files_with_identical_size_referenced: BTreeMap<u64, (DuplicateEntry, Vec<DuplicateEntry>)>,
+    // File Size, next grouped by file size, next grouped by hash
+    files_with_identical_hashes_referenced: BTreeMap<u64, Vec<(DuplicateEntry, Vec<DuplicateEntry>)>>,
+    params: DuplicateFinderParameters,
+}
+
+#[cfg(target_family = "windows")]
+fn filter_hard_links(vec_file_entry: Vec<FileEntry>) -> Vec<FileEntry> {
+    let mut inodes: IndexSet<u128> = IndexSet::with_capacity(vec_file_entry.len());
+    let mut identical: Vec<FileEntry> = Vec::with_capacity(vec_file_entry.len());
+    for f in vec_file_entry {
+        if let Ok(file_id::FileId::HighRes { file_id, .. }) = file_id::get_high_res_file_id(&f.path)
+            && !inodes.insert(file_id)
+        {
+            continue;
+        }
+        identical.push(f);
+    }
+    identical
+}
+
+#[cfg(target_family = "unix")]
+fn filter_hard_links(vec_file_entry: Vec<FileEntry>) -> Vec<FileEntry> {
+    let mut inodes: IndexSet<u64> = IndexSet::with_capacity(vec_file_entry.len());
+    let mut identical: Vec<FileEntry> = Vec::with_capacity(vec_file_entry.len());
+    for f in vec_file_entry {
+        if let Ok(meta) = fs::metadata(&f.path)
+            && !inodes.insert(meta.ino())
+        {
+            continue;
+        }
+        identical.push(f);
+    }
+    identical
+}
+
+pub trait MyHasher {
+    fn update(&mut self, bytes: &[u8]);
+    fn finalize(&self) -> String;
+}
+
+impl DuplicateFinder {
+    pub fn get_params(&self) -> &DuplicateFinderParameters {
+        &self.params
+    }
+
+    pub const fn get_files_sorted_by_names(&self) -> &BTreeMap<String, Vec<DuplicateEntry>> {
+        &self.files_with_identical_names
+    }
+
+    pub const fn get_files_sorted_by_size(&self) -> &BTreeMap<u64, Vec<DuplicateEntry>> {
+        &self.files_with_identical_size
+    }
+
+    pub const fn get_files_sorted_by_size_name(&self) -> &BTreeMap<(u64, String), Vec<DuplicateEntry>> {
+        &self.files_with_identical_size_names
+    }
+
+    pub const fn get_files_sorted_by_hash(&self) -> &BTreeMap<u64, Vec<Vec<DuplicateEntry>>> {
+        &self.files_with_identical_hashes
+    }
+
+    pub const fn get_information(&self) -> Info {
+        self.information
+    }
+
+    pub fn set_dry_run(&mut self, dry_run: bool) {
+        self.common_data.dry_run = dry_run;
+    }
+
+    pub fn get_use_reference(&self) -> bool {
+        self.common_data.use_reference_folders
+    }
+
+    pub fn get_files_with_identical_hashes_referenced(&self) -> &BTreeMap<u64, Vec<(DuplicateEntry, Vec<DuplicateEntry>)>> {
+        &self.files_with_identical_hashes_referenced
+    }
+
+    pub fn get_files_with_identical_name_referenced(&self) -> &BTreeMap<String, (DuplicateEntry, Vec<DuplicateEntry>)> {
+        &self.files_with_identical_names_referenced
+    }
+
+    pub fn get_files_with_identical_size_referenced(&self) -> &BTreeMap<u64, (DuplicateEntry, Vec<DuplicateEntry>)> {
+        &self.files_with_identical_size_referenced
+    }
+
+    pub fn get_files_with_identical_size_names_referenced(&self) -> &BTreeMap<(u64, String), (DuplicateEntry, Vec<DuplicateEntry>)> {
+        &self.files_with_identical_size_names_referenced
+    }
+}
+
+pub(crate) fn hash_calculation_limit(buffer: &mut [u8], file_entry: &DuplicateEntry, hash_type: HashType, limit: u64, size_counter: &Arc<AtomicU64>) -> Result<String, String> {
+    // Reads up to `limit` bytes from the start and up to `limit` from the end into one hasher.
+    // When the head and tail would overlap (size <= 2*limit) the whole file is read in a single pass.
+    const_assert!(PREHASHING_BUFFER_SIZE * 2 <= THREAD_BUFFER_SIZE as u64);
+
+    let mut file_handler = match File::open(&file_entry.path) {
+        Ok(t) => t,
+        Err(e) => {
+            size_counter.fetch_add(file_entry.size.min(2 * limit), Ordering::Relaxed);
+            return Err(flc!(
+                "core_unable_check_hash_of_file",
+                file = file_entry.path.to_string_lossy().to_string(),
+                reason = e.to_string()
+            ));
+        }
+    };
+    let hasher = &mut *hash_type.hasher();
+
+    if file_entry.size <= 2 * limit {
+        // Head and tail would overlap - read the whole file in a single pass.
+        #[expect(clippy::indexing_slicing)] // Safe: size <= 2 * limit <= buffer size
+        let n = match read_filling(&mut file_handler, &mut buffer[..file_entry.size as usize]) {
+            Ok(t) => t,
+            Err(e) => return Err(flc!("core_error_checking_hash_of_file", file = file_entry.path.to_string_lossy(), reason = e.to_string())),
+        };
+        #[expect(clippy::indexing_slicing)] // Safe: n <= size <= buffer size
+        hasher.update(&buffer[..n]);
+        size_counter.fetch_add(n as u64, Ordering::Relaxed);
+    } else {
+        // Read first `limit` bytes from the start of the file
+        #[expect(clippy::indexing_slicing)] // Safe: limit <= PREHASHING_BUFFER_SIZE <= buffer size / 2
+        let n = match read_filling(&mut file_handler, &mut buffer[..limit as usize]) {
+            Ok(t) => t,
+            Err(e) => return Err(flc!("core_error_checking_hash_of_file", file = file_entry.path.to_string_lossy(), reason = e.to_string())),
+        };
+        #[expect(clippy::indexing_slicing)] // Safe: n <= limit <= buffer size / 2
+        hasher.update(&buffer[..n]);
+        size_counter.fetch_add(n as u64, Ordering::Relaxed);
+
+        // Read the last `limit` bytes from the end of the file
+        let tail_offset = file_entry.size - limit;
+        if let Err(e) = file_handler.seek(SeekFrom::Start(tail_offset)) {
+            return Err(flc!("core_error_checking_hash_of_file", file = file_entry.path.to_string_lossy(), reason = e.to_string()));
+        }
+        #[expect(clippy::indexing_slicing)] // Safe: limit * 2 <= THREAD_BUFFER_SIZE <= buffer size
+        let n2 = match read_filling(&mut file_handler, &mut buffer[limit as usize..limit as usize * 2]) {
+            Ok(t) => t,
+            Err(e) => return Err(flc!("core_error_checking_hash_of_file", file = file_entry.path.to_string_lossy(), reason = e.to_string())),
+        };
+        #[expect(clippy::indexing_slicing)] // Safe: n2 <= limit, offset limit <= buffer size / 2
+        hasher.update(&buffer[limit as usize..limit as usize + n2]);
+        size_counter.fetch_add(n2 as u64, Ordering::Relaxed);
+    }
+
+    Ok(hasher.finalize())
+}
+
+// Repeatedly calls Read::read until `buf` is full or EOF is reached.
+// `Read::read` is allowed to return short reads, so a single call can
+// hash fewer bytes than expected and produce a different hash on the
+// next run for the same file. This wrapper guarantees a stable prehash.
+fn read_filling(reader: &mut impl Read, buf: &mut [u8]) -> std::io::Result<usize> {
+    let mut total = 0;
+    while total < buf.len() {
+        #[expect(clippy::indexing_slicing)] // Safe: total < buf.len()
+        match reader.read(&mut buf[total..]) {
+            Ok(0) => break,
+            Ok(n) => total += n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(total)
+}
+
+pub fn hash_calculation(
+    buffer: &mut [u8],
+    file_entry: &DuplicateEntry,
+    hash_type: HashType,
+    size_counter: &Arc<AtomicU64>,
+    stop_flag: &Arc<AtomicBool>,
+) -> Result<Option<String>, String> {
+    let mut file_handler = match File::open(&file_entry.path) {
+        Ok(t) => t,
+        Err(e) => {
+            size_counter.fetch_add(file_entry.size, Ordering::Relaxed);
+            return Err(flc!("core_unable_check_hash_of_file", file = file_entry.path.to_string_lossy(), reason = e.to_string()));
+        }
+    };
+    let hasher = &mut *hash_type.hasher();
+    loop {
+        let n = match file_handler.read(buffer) {
+            Ok(0) => break,
+            Ok(t) => t,
+            Err(e) => return Err(flc!("core_error_checking_hash_of_file", file = file_entry.path.to_string_lossy(), reason = e.to_string())),
+        };
+
+        #[expect(clippy::indexing_slicing)] // Safe, because we read only n bytes, which is always <= buffer size
+        hasher.update(&buffer[..n]);
+        size_counter.fetch_add(n as u64, Ordering::Relaxed);
+        if check_if_stop_received(stop_flag) {
+            return Ok(None);
+        }
+    }
+    Ok(Some(hasher.finalize()))
+}
+
+impl MyHasher for blake3::Hasher {
+    fn update(&mut self, bytes: &[u8]) {
+        self.update(bytes);
+    }
+    fn finalize(&self) -> String {
+        self.finalize().to_hex().to_string()
+    }
+}
+
+impl MyHasher for crc32fast::Hasher {
+    fn update(&mut self, bytes: &[u8]) {
+        self.write(bytes);
+    }
+    fn finalize(&self) -> String {
+        self.finish().to_string()
+    }
+}
+
+impl MyHasher for Xxh3 {
+    fn update(&mut self, bytes: &[u8]) {
+        self.write(bytes);
+    }
+    fn finalize(&self) -> String {
+        self.finish().to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests2 {
+    use std::fs::File;
+    use std::io;
+
+    use super::*;
+    use crate::common::model::FileEntry;
+    use crate::tools::duplicate::filter_hard_links;
+
+    #[test]
+    fn test_filter_hard_links_empty() {
+        let expected: Vec<FileEntry> = Default::default();
+        assert_eq!(expected, filter_hard_links(Vec::new()));
+    }
+
+    #[cfg(target_family = "unix")]
+    #[test]
+    fn test_filter_hard_links() -> io::Result<()> {
+        let dir = tempfile::Builder::new().tempdir()?;
+        let (src, dst) = (dir.path().join("a"), dir.path().join("b"));
+        File::create(&src)?;
+        fs::hard_link(src.clone(), dst.clone())?;
+        let e1 = FileEntry { path: src, ..Default::default() };
+        let e2 = FileEntry { path: dst, ..Default::default() };
+        let actual = filter_hard_links(vec![e1.clone(), e2]);
+        assert_eq!(vec![e1], actual);
+        Ok(())
+    }
+
+    #[test]
+    fn test_filter_hard_links_regular_files() -> io::Result<()> {
+        let dir = tempfile::Builder::new().tempdir()?;
+        let (src, dst) = (dir.path().join("a"), dir.path().join("b"));
+        File::create(&src)?;
+        File::create(&dst)?;
+        let e1 = FileEntry { path: src, ..Default::default() };
+        let e2 = FileEntry { path: dst, ..Default::default() };
+        let actual = filter_hard_links(vec![e1.clone(), e2.clone()]);
+        assert_eq!(vec![e1, e2], actual);
+        Ok(())
+    }
+
+    #[test]
+    fn test_hash_calculation() -> io::Result<()> {
+        let dir = tempfile::Builder::new().tempdir()?;
+        let mut buf = [0u8; 1 << 10];
+        let src = dir.path().join("a");
+        let mut file = File::create(&src)?;
+        file.write_all(b"aaAAAAAAAAAAAAAAFFFFFFFFFFFFFFFFFFFFGGGGGGGGG")?;
+        let e = DuplicateEntry { path: src, ..Default::default() };
+        let size_counter = Arc::new(AtomicU64::new(0));
+        let r = hash_calculation(&mut buf, &e, HashType::Blake3, &size_counter, &Arc::default())
+            .expect("hash_calculation failed")
+            .expect("hash_calculation returned None");
+        assert!(!r.is_empty());
+        assert_eq!(size_counter.load(Ordering::Relaxed), 45);
+        Ok(())
+    }
+
+    #[test]
+    fn test_hash_calculation_limit() -> io::Result<()> {
+        let dir = tempfile::Builder::new().tempdir()?;
+        let mut buf = vec![0u8; (PREHASHING_BUFFER_SIZE * 2) as usize];
+        let src = dir.path().join("a");
+        File::create(&src)?.write_all(b"hello world")?;
+        // size <= 2*limit for both limits, so the whole file is read in one pass regardless of limit.
+        let e = DuplicateEntry {
+            path: src,
+            size: 11,
+            ..Default::default()
+        };
+        let size_counter_1 = Arc::new(AtomicU64::new(0));
+        let size_counter_2 = Arc::new(AtomicU64::new(0));
+        let r1 = hash_calculation_limit(&mut buf, &e, HashType::Blake3, 100, &size_counter_1).expect("hash_calculation failed");
+        let r2 = hash_calculation_limit(&mut buf, &e, HashType::Blake3, PREHASHING_BUFFER_SIZE, &size_counter_2).expect("hash_calculation failed");
+        assert_eq!(r1, r2);
+
+        assert_eq!(11, size_counter_1.load(Ordering::Relaxed));
+        assert_eq!(11, size_counter_2.load(Ordering::Relaxed));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_hash_calculation_limit_tail_read() -> io::Result<()> {
+        let dir = tempfile::Builder::new().tempdir()?;
+        let mut buf = vec![0u8; (PREHASHING_BUFFER_SIZE * 2) as usize];
+
+        // File larger than 2*limit, so head and tail are read separately (gap in the middle).
+        let file_size = 2 * PREHASHING_BUFFER_SIZE + 100;
+
+        // File A: all zeros.
+        let src_a = dir.path().join("a");
+        let content_a = vec![0u8; file_size as usize];
+        File::create(&src_a)?.write_all(&content_a)?;
+
+        // File B: identical to A except the very last byte differs.
+        let src_b = dir.path().join("b");
+        let mut content_b = content_a;
+        content_b[file_size as usize - 1] = 1;
+        File::create(&src_b)?.write_all(&content_b)?;
+
+        let e_a = DuplicateEntry {
+            path: src_a,
+            size: file_size,
+            ..Default::default()
+        };
+        let e_b = DuplicateEntry {
+            path: src_b,
+            size: file_size,
+            ..Default::default()
+        };
+        let counter_a = Arc::new(AtomicU64::new(0));
+        let counter_b = Arc::new(AtomicU64::new(0));
+
+        let hash_a = hash_calculation_limit(&mut buf, &e_a, HashType::Blake3, PREHASHING_BUFFER_SIZE, &counter_a).expect("hash_a failed");
+        let hash_b = hash_calculation_limit(&mut buf, &e_b, HashType::Blake3, PREHASHING_BUFFER_SIZE, &counter_b).expect("hash_b failed");
+
+        // Hashes must differ: the tail chunk covers the differing last byte.
+        assert_ne!(hash_a, hash_b);
+        // Each file caused two reads of PREHASHING_BUFFER_SIZE bytes (head + tail).
+        assert_eq!(counter_a.load(Ordering::Relaxed), 2 * PREHASHING_BUFFER_SIZE);
+        assert_eq!(counter_b.load(Ordering::Relaxed), 2 * PREHASHING_BUFFER_SIZE);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_hash_calculation_limit_overlap_read_whole_file() -> io::Result<()> {
+        let dir = tempfile::Builder::new().tempdir()?;
+        let mut buf = vec![0u8; (PREHASHING_BUFFER_SIZE * 2) as usize];
+
+        // File between limit and 2*limit: the head and tail would overlap, so it is read whole in one pass.
+        let file_size = PREHASHING_BUFFER_SIZE + 1;
+
+        // Two files differing only in a middle byte that a head+tail read would have skipped.
+        let src_a = dir.path().join("a");
+        let content_a = vec![0u8; file_size as usize];
+        File::create(&src_a)?.write_all(&content_a)?;
+
+        let src_b = dir.path().join("b");
+        let mut content_b = content_a;
+        content_b[(file_size / 2) as usize] = 1;
+        File::create(&src_b)?.write_all(&content_b)?;
+
+        let e_a = DuplicateEntry {
+            path: src_a,
+            size: file_size,
+            ..Default::default()
+        };
+        let e_b = DuplicateEntry {
+            path: src_b,
+            size: file_size,
+            ..Default::default()
+        };
+        let counter_a = Arc::new(AtomicU64::new(0));
+        let counter_b = Arc::new(AtomicU64::new(0));
+
+        let hash_a = hash_calculation_limit(&mut buf, &e_a, HashType::Blake3, PREHASHING_BUFFER_SIZE, &counter_a).expect("hash_a failed");
+        let hash_b = hash_calculation_limit(&mut buf, &e_b, HashType::Blake3, PREHASHING_BUFFER_SIZE, &counter_b).expect("hash_b failed");
+
+        // The middle byte is covered because the whole file is read, so the hashes differ.
+        assert_ne!(hash_a, hash_b);
+        // Only the file's actual bytes are read once - no double-counted overlap.
+        assert_eq!(counter_a.load(Ordering::Relaxed), file_size);
+        assert_eq!(counter_b.load(Ordering::Relaxed), file_size);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_hash_calculation_invalid_file() -> io::Result<()> {
+        let dir = tempfile::Builder::new().tempdir()?;
+        let mut buf = [0u8; 1 << 10];
+        let src = dir.path().join("a");
+        let e = DuplicateEntry { path: src, ..Default::default() };
+        let r = hash_calculation(&mut buf, &e, HashType::Blake3, &Arc::default(), &Arc::default()).expect_err("hash_calculation succeeded");
+        assert!(!r.is_empty());
+        Ok(())
+    }
+}

@@ -1,0 +1,55 @@
+﻿// 液态玻璃按钮
+//
+// 两种形态，靠传入的 bg 区分：
+//  · 主按钮（accent 实心）：胶囊形，按下时整体压暗 14%，配一层很淡的同色外发光
+//  · 次按钮（透明白 + 描边）：玻璃胶囊，按下时变实
+//
+// 曲线统一走 ease-out-quart（0.25, 1, 0.5, 1），比线性自然，比回弹克制。
+
+import { Fonts } from "../../globals/fonts.slint";
+import { CediniaColors } from "../../globals/colors.slint";
+
+export component TouchButton {
+    in property <string>  label;
+    in property <color>   bg:       CediniaColors.accent;
+    in property <color>   fg:       CediniaColors.fg_on_accent;
+    in property <bool>    enabled:  true;
+    in property <length>  min_h:    46px;
+    in property <length>  radius:   23px;
+
+    callback clicked;
+
+    height: max(min_h, txt.preferred-height + 22px);
+    min-width: txt.preferred-width + 36px;
+
+    Rectangle {
+        border-radius: root.radius;
+        background: !root.enabled
+            ? CediniaColors.fill_tertiary
+            : ta.pressed ? root.bg.darker(0.14) : root.bg;
+        border-width: 1px;
+        border-color: ta.pressed ? transparent : CediniaColors.glass_stroke;
+
+        drop-shadow-blur: ta.pressed ? 6px : 14px;
+        drop-shadow-offset-y: ta.pressed ? 2px : 5px;
+        drop-shadow-color: root.bg.with-alpha(0.28);
+
+        animate background { duration: 150ms; easing: ease-out; }
+        animate drop-shadow-blur { duration: 150ms; easing: ease-out; }
+        animate drop-shadow-offset-y { duration: 150ms; easing: ease-out; }
+
+        ta := TouchArea {
+            enabled: root.enabled;
+            clicked => { root.clicked(); }
+        }
+
+        txt := Text {
+            text: root.label;
+            color: root.enabled ? root.fg : CediniaColors.text_disabled;
+            font-size: Fonts.body;
+            font-weight: Fonts.semibold;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}

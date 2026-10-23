@@ -1,0 +1,78 @@
+import { Fonts } from "../../globals/fonts.slint";
+import { CediniaColors } from "../../globals/colors.slint";
+import { AppState } from "../../globals/app_state.slint";
+
+export component ToggleRow {
+    in property <string> label;
+    in property <string> description: "";
+    in-out property <bool> value;
+    in property <bool> enabled: true;
+
+    height: root.description == "" ? 56px : 72px;
+    opacity: root.enabled ? 1.0 : 0.4;
+
+    Rectangle {
+        background: ta.has-hover && root.enabled ? CediniaColors.bg_elevated : transparent;
+        animate background { duration: 100ms; }
+
+        ta := TouchArea {
+            enabled: root.enabled;
+            clicked => {
+                root.value = !root.value;
+                AppState.save_settings_now();
+            }
+        }
+
+        HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            spacing: 12px;
+
+            VerticalLayout {
+                alignment: LayoutAlignment.center;
+                horizontal-stretch: 1.0;
+                spacing: 2px;
+                Text {
+                    text: root.label;
+                    color: CediniaColors.text_primary;
+                    font-size: Fonts.label_lg;
+                }
+                if root.description != "" : Text {
+                    text: root.description;
+                    color: CediniaColors.text_secondary;
+                    font-size: Fonts.body;
+                    wrap: word-wrap;
+                }
+            }
+
+            VerticalLayout {
+                alignment: LayoutAlignment.center;
+                // iOS 尺寸的玻璃开关：轨道半透明 + 内描边，拇指带投影
+                Rectangle {
+                    width: 51px;
+                    height: 31px;
+                    vertical-stretch: 0.0;
+                    border-radius: 16px;
+                    background: root.value ? CediniaColors.accent : CediniaColors.fill_secondary;
+                    border-width: root.value ? 0px : 1px;
+                    border-color: CediniaColors.glass_stroke;
+                    animate background { duration: 200ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
+                    animate border-width { duration: 200ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
+
+                    Rectangle {
+                        x: root.value ? parent.width - self.width - 2px : 2px;
+                        y: 2px;
+                        width: 27px;
+                        height: 27px;
+                        border-radius: 14px;
+                        background: #ffffff;
+                        drop-shadow-blur: 4px;
+                        drop-shadow-offset-y: 2px;
+                        drop-shadow-color: #00000040;
+                        animate x { duration: 280ms; easing: cubic-bezier(0.32, 0.72, 0, 1); }
+                    }
+                }
+            }
+        }
+    }
+}

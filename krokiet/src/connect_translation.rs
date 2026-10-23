@@ -1,0 +1,637 @@
+use czkawka_core::TOOLS_NUMBER;
+use czkawka_core::localizer_core::LANGUAGE_LIST;
+use i18n_embed::DesktopLanguageRequester;
+use i18n_embed::unic_langid::LanguageIdentifier;
+use log::{error, info};
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+
+use crate::settings::combo_box::{SimilarVideosAudioPreset, SimilarVideosVisualPreset, StringComboBoxItems};
+use crate::{ActiveTab, Callabler, GuiState, MainWindow, SelectMode, Settings, SortMode, SortModel, Translations, flk, localizer_krokiet};
+
+pub(crate) fn connect_translations(app: &MainWindow) {
+    change_language(app);
+
+    let a = app.as_weak();
+    app.global::<Callabler>().on_changed_language(move || {
+        let app = a.upgrade().expect("MainWindow dropped");
+        change_language(&app);
+    });
+
+    let a = app.as_weak();
+    app.global::<Callabler>().on_similar_videos_audio_preset_changed(move || {
+        let app = a.upgrade().expect("MainWindow dropped");
+        apply_similar_videos_audio_preset(&app);
+    });
+
+    let a = app.as_weak();
+    app.global::<Callabler>().on_similar_videos_visual_preset_changed(move || {
+        let app = a.upgrade().expect("MainWindow dropped");
+        apply_similar_videos_visual_preset(&app);
+    });
+}
+
+pub fn find_the_closest_language_idx_to_system() -> usize {
+    let requested_languages = DesktopLanguageRequester::requested_languages();
+    if let Some(language) = requested_languages.first() {
+        let tag = language.to_string();
+        info!("System language: {tag}");
+        return czkawka_core::localizer_core::find_language_idx(&tag);
+    }
+    0
+}
+
+pub(crate) fn change_language(app: &MainWindow) {
+    let localizers = vec![
+        ("czkawka_core", czkawka_core::localizer_core::localizer_core()),
+        ("krokiet", localizer_krokiet::localizer_krokiet()),
+    ];
+
+    let lang = app.global::<Settings>().get_language_index();
+    let lang_items = &LANGUAGE_LIST[lang as usize];
+
+    let lang_identifier = vec![LanguageIdentifier::from_bytes(lang_items.short_name.as_bytes()).expect("Failed to create LanguageIdentifier")];
+    for (lib, localizer) in localizers {
+        if let Err(error) = localizer.select(&lang_identifier) {
+            error!("Error while loading languages for {lib} {error:?}");
+        }
+    }
+
+    StringComboBoxItems::regenerate_and_set();
+
+    translate_items(app);
+}
+
+// To generate this, check misc folder
+// This is ugly workaround for missing fluent language support in slint
+fn translate_items(app: &MainWindow) {
+    let translation = app.global::<Translations>();
+    let settings = app.global::<Settings>();
+
+    translation.set_ok_button_text(flk!("ok_button").into());
+    translation.set_cancel_button_text(flk!("cancel_button").into());
+    translation.set_yes_text(flk!("yes_text").into());
+    translation.set_no_text(flk!("no_text").into());
+    translation.set_do_you_want_to_continue_text(flk!("do_you_want_to_continue").into());
+    translation.set_main_window_title_text(flk!("main_window_title").into());
+    translation.set_file_dialog_open_text(flk!("file_dialog_open").into());
+    translation.set_scan_button_text(flk!("scan_button").into());
+    translation.set_stop_button_text(flk!("stop_button").into());
+    translation.set_select_button_text(flk!("select_button").into());
+    translation.set_move_button_text(flk!("move_button").into());
+    translation.set_delete_button_text(flk!("delete_button").into());
+    translation.set_trash_button_text(flk!("trash_button").into());
+    translation.set_save_button_text(flk!("save_button").into());
+    translation.set_sort_button_text(flk!("sort_button").into());
+    translation.set_rename_button_text(flk!("rename_button").into());
+    translation.set_motto_text(flk!("motto").into());
+    translation.set_unicorn_text(flk!("unicorn").into());
+    translation.set_repository_text(flk!("repository").into());
+    translation.set_instruction_text(flk!("instruction").into());
+    translation.set_donation_text(flk!("donation").into());
+    translation.set_translation_text(flk!("translation").into());
+    translation.set_other_apps_text(flk!("other_apps").into());
+    translation.set_build_info_build_text(flk!("build_info_build").into());
+    translation.set_build_info_runtime_text(flk!("build_info_runtime").into());
+    translation.set_build_info_refresh_text(flk!("build_info_refresh").into());
+    translation.set_build_info_diagnostic_button_text(flk!("build_info_diagnostic_button").into());
+    translation.set_build_info_diagnostic_title_text(flk!("build_info_diagnostic_title").into());
+    translation.set_build_info_library_restart_hint_text(flk!("build_info_library_restart_hint").into());
+    translation.set_build_info_test_file_text(flk!("build_info_test_file").into());
+    translation.set_other_apps_title_text(flk!("other_apps_title").into());
+    translation.set_other_apps_open_source_note_text(flk!("other_apps_open_source_note").into());
+    translation.set_other_apps_open_button_text(flk!("other_apps_open_button").into());
+    translation.set_other_apps_descriptions(ModelRc::new(VecModel::from(vec![
+        SharedString::from(flk!("other_apps_szyszka_desc")),
+        SharedString::from(flk!("other_apps_mykrut_desc")),
+        SharedString::from(flk!("other_apps_dcmki_viewer_desc")),
+        SharedString::from(flk!("other_apps_video_thumbnailer_desc")),
+        SharedString::from(flk!("other_apps_space_finder_desc")),
+        SharedString::from(flk!("other_apps_system_info_collector_desc")),
+    ])));
+    translation.set_included_paths_text(flk!("included_paths").into());
+    translation.set_excluded_paths_text(flk!("excluded_paths").into());
+    translation.set_ref_text(flk!("ref").into());
+    translation.set_path_text(flk!("path").into());
+    translation.set_tool_duplicate_files_text(flk!("tool_duplicate_files").into());
+    translation.set_tool_empty_folders_text(flk!("tool_empty_folders").into());
+    translation.set_tool_big_files_text(flk!("tool_big_files").into());
+    translation.set_tool_empty_files_text(flk!("tool_empty_files").into());
+    translation.set_tool_temporary_files_text(flk!("tool_temporary_files").into());
+    translation.set_tool_similar_images_text(flk!("tool_similar_images").into());
+    translation.set_tool_similar_videos_text(flk!("tool_similar_videos").into());
+    translation.set_tool_music_duplicates_text(flk!("tool_music_duplicates").into());
+    translation.set_tool_invalid_symlinks_text(flk!("tool_invalid_symlinks").into());
+    translation.set_tool_broken_files_text(flk!("tool_broken_files").into());
+    translation.set_tool_bad_extensions_text(flk!("tool_bad_extensions").into());
+    translation.set_tool_exif_remover_text(flk!("tool_exif_remover").into());
+    translation.set_tool_video_optimizer_text(flk!("tool_video_optimizer").into());
+    translation.set_tool_bad_names_text(flk!("tool_bad_names").into());
+    translation.set_sort_by_full_name_text(flk!("sort_by_full_name").into());
+    translation.set_sort_by_focus_text(flk!("sort_by_focus").into());
+    translation.set_sort_reverse_text(flk!("sort_reverse").into());
+    translation.set_settings_dark_theme_text(flk!("settings_dark_theme").into());
+    translation.set_settings_show_only_icons_text(flk!("settings_show_only_icons").into());
+    translation.set_settings_global_settings_text(flk!("settings_global_settings").into());
+    translation.set_selection_all_text(flk!("selection_all").into());
+    translation.set_selection_deselect_all_text(flk!("selection_deselect_all").into());
+    translation.set_stage_current_text(flk!("stage_current").into());
+    translation.set_stage_all_text(flk!("stage_all").into());
+    translation.set_subsettings_text(flk!("subsettings").into());
+    translation.set_subsettings_images_hash_size_text(flk!("subsettings_images_hash_size").into());
+    translation.set_subsettings_images_resize_algorithm_text(flk!("subsettings_images_resize_algorithm").into());
+    translation.set_subsettings_images_ignore_same_size_text(flk!("subsettings_images_ignore_same_size").into());
+    translation.set_subsettings_images_ignore_same_resolution_text(flk!("subsettings_images_ignore_same_resolution").into());
+    translation.set_subsettings_images_max_difference_text(flk!("subsettings_images_max_difference").into());
+    translation.set_subsettings_images_geometric_invariance_text(flk!("subsettings_images_geometric_invariance").into());
+    translation.set_subsettings_images_duplicates_hash_type_text(flk!("subsettings_images_duplicates_hash_type").into());
+    translation.set_subsettings_duplicates_check_method_text(flk!("subsettings_duplicates_check_method").into());
+    translation.set_subsettings_duplicates_name_case_sensitive_text(flk!("subsettings_duplicates_name_case_sensitive").into());
+    translation.set_subsettings_biggest_files_sub_method_text(flk!("subsettings_biggest_files_sub_method").into());
+    translation.set_subsettings_biggest_files_sub_number_of_files_text(flk!("subsettings_biggest_files_sub_number_of_files").into());
+    translation.set_subsettings_videos_max_difference_text(flk!("subsettings_videos_max_difference").into());
+    translation.set_subsettings_videos_ignore_same_size_text(flk!("subsettings_videos_ignore_same_size").into());
+    translation.set_subsettings_videos_ignore_same_resolution_text(flk!("subsettings_videos_ignore_same_resolution").into());
+    translation.set_subsettings_videos_audio_check_content_text(flk!("subsettings_videos_audio_check_content").into());
+    translation.set_subsettings_videos_audio_preset_text(flk!("subsettings_videos_audio_preset").into());
+    translation.set_subsettings_videos_audio_preset_custom(flk!("subsettings_videos_audio_preset_custom").into());
+    translation.set_subsettings_videos_audio_preset_identical(flk!("subsettings_videos_audio_preset_identical").into());
+    translation.set_subsettings_videos_audio_preset_clip(flk!("subsettings_videos_audio_preset_clip").into());
+    translation.set_subsettings_videos_audio_preset_similar(flk!("subsettings_videos_audio_preset_similar").into());
+
+    let preset_names: [SharedString; 4] = [
+        flk!("subsettings_videos_audio_preset_custom").into(),
+        flk!("subsettings_videos_audio_preset_identical").into(),
+        flk!("subsettings_videos_audio_preset_clip").into(),
+        flk!("subsettings_videos_audio_preset_similar").into(),
+    ];
+    let idx = settings.get_similar_videos_audio_preset_index().clamp(0, 3) as usize;
+    settings.set_similar_videos_audio_preset_value(preset_names[idx].clone());
+    settings.set_similar_videos_audio_preset_names(ModelRc::new(VecModel::from(preset_names.to_vec())));
+
+    translation.set_subsettings_videos_visual_preset_text(flk!("subsettings_videos_visual_preset").into());
+    translation.set_subsettings_videos_visual_preset_custom(flk!("subsettings_videos_visual_preset_custom").into());
+    translation.set_subsettings_videos_visual_preset_near_identical(flk!("subsettings_videos_visual_preset_near_identical").into());
+    translation.set_subsettings_videos_visual_preset_similar(flk!("subsettings_videos_visual_preset_similar").into());
+    translation.set_subsettings_videos_visual_preset_movies(flk!("subsettings_videos_visual_preset_movies").into());
+    translation.set_subsettings_videos_duration_tolerance_pct_text(flk!("subsettings_videos_duration_tolerance_pct").into());
+    translation.set_subsettings_videos_min_matching_windows_text(flk!("subsettings_videos_min_matching_windows").into());
+    translation.set_subsettings_videos_subclip_min_match_text(flk!("subsettings_videos_subclip_min_match").into());
+
+    let visual_preset_names: [SharedString; 4] = [
+        flk!("subsettings_videos_visual_preset_custom").into(),
+        flk!("subsettings_videos_visual_preset_near_identical").into(),
+        flk!("subsettings_videos_visual_preset_similar").into(),
+        flk!("subsettings_videos_visual_preset_movies").into(),
+    ];
+    let v_idx = settings.get_similar_videos_visual_preset_index().clamp(0, 3) as usize;
+    settings.set_similar_videos_visual_preset_value(visual_preset_names[v_idx].clone());
+    settings.set_similar_videos_visual_preset_names(ModelRc::new(VecModel::from(visual_preset_names.to_vec())));
+    apply_similar_videos_visual_preset(app);
+    translation.set_subsettings_videos_audio_similarity_percent_text(flk!("subsettings_videos_audio_similarity_percent").into());
+    translation.set_subsettings_videos_audio_length_ratio_text(flk!("subsettings_videos_audio_length_ratio").into());
+    translation.set_subsettings_videos_audio_min_duration_seconds_text(flk!("subsettings_videos_audio_min_duration_seconds").into());
+    translation.set_subsettings_videos_audio_maximum_difference_text(flk!("subsettings_videos_audio_maximum_difference").into());
+    translation.set_subsettings_music_audio_check_type_text(flk!("subsettings_music_audio_check_type").into());
+    translation.set_subsettings_music_approximate_comparison_text(flk!("subsettings_music_approximate_comparison").into());
+    translation.set_subsettings_music_compared_tags_text(flk!("subsettings_music_compared_tags").into());
+    translation.set_subsettings_music_title_text(flk!("subsettings_music_title").into());
+    translation.set_subsettings_music_artist_text(flk!("subsettings_music_artist").into());
+    translation.set_subsettings_music_bitrate_text(flk!("subsettings_music_bitrate").into());
+    translation.set_subsettings_music_genre_text(flk!("subsettings_music_genre").into());
+    translation.set_subsettings_music_year_text(flk!("subsettings_music_year").into());
+    translation.set_subsettings_music_length_text(flk!("subsettings_music_length").into());
+    translation.set_subsettings_music_max_difference_text(flk!("subsettings_music_max_difference").into());
+    translation.set_subsettings_music_minimal_fragment_duration_text(flk!("subsettings_music_minimal_fragment_duration").into());
+    translation.set_subsettings_music_compare_fingerprints_only_with_similar_titles_text(flk!("subsettings_music_compare_fingerprints_only_with_similar_titles").into());
+    translation.set_subsettings_broken_files_type_text(flk!("subsettings_broken_files_type").into());
+    translation.set_subsettings_empty_files_type_text(flk!("subsettings_empty_files_type").into());
+    translation.set_subsettings_empty_files_zero_byte_content_text(flk!("subsettings_empty_files_zero_byte_content").into());
+    translation.set_subsettings_empty_files_zero_byte_content_hint_text(flk!("subsettings_empty_files_zero_byte_content_hint").into());
+    translation.set_subsettings_empty_files_non_printable_content_text(flk!("subsettings_empty_files_non_printable_content").into());
+    translation.set_subsettings_empty_files_non_printable_content_hint_text(flk!("subsettings_empty_files_non_printable_content_hint").into());
+    translation.set_subsettings_broken_files_audio_text(flk!("subsettings_broken_files_audio").into());
+    translation.set_subsettings_broken_files_pdf_text(flk!("subsettings_broken_files_pdf").into());
+    translation.set_subsettings_broken_files_archive_text(flk!("subsettings_broken_files_archive").into());
+    translation.set_subsettings_broken_files_image_text(flk!("subsettings_broken_files_image").into());
+    translation.set_subsettings_broken_files_video_ffprobe_text(flk!("subsettings_broken_files_video_ffprobe").into());
+    translation.set_subsettings_broken_files_video_ffprobe_info_text(flk!("subsettings_broken_files_video_ffprobe_info").into());
+    translation.set_subsettings_broken_files_video_ffmpeg_text(flk!("subsettings_broken_files_video_ffmpeg").into());
+    translation.set_subsettings_broken_files_video_ffmpeg_info_text(flk!("subsettings_broken_files_video_ffmpeg_info").into());
+    translation.set_subsettings_broken_files_font_text(flk!("subsettings_broken_files_font").into());
+    translation.set_subsettings_broken_files_markup_text(flk!("subsettings_broken_files_markup").into());
+    translation.set_subsettings_bad_names_issues_text(flk!("subsettings_bad_names_issues").into());
+    translation.set_subsettings_bad_names_uppercase_extension_text(flk!("subsettings_bad_names_uppercase_extension").into());
+    translation.set_subsettings_bad_names_uppercase_extension_hint_text(flk!("subsettings_bad_names_uppercase_extension_hint").into());
+    translation.set_subsettings_bad_names_emoji_used_text(flk!("subsettings_bad_names_emoji_used").into());
+    translation.set_subsettings_bad_names_emoji_used_hint_text(flk!("subsettings_bad_names_emoji_used_hint").into());
+    translation.set_subsettings_bad_names_space_at_start_end_text(flk!("subsettings_bad_names_space_at_start_end").into());
+    translation.set_subsettings_bad_names_space_at_start_end_hint_text(flk!("subsettings_bad_names_space_at_start_end_hint").into());
+    translation.set_subsettings_bad_names_non_ascii_text(flk!("subsettings_bad_names_non_ascii").into());
+    translation.set_subsettings_bad_names_non_ascii_hint_text(flk!("subsettings_bad_names_non_ascii_hint").into());
+    translation.set_subsettings_bad_names_restricted_charset_text(flk!("subsettings_bad_names_restricted_charset").into());
+    translation.set_subsettings_bad_names_restricted_charset_hint_text(flk!("subsettings_bad_names_restricted_charset_hint").into());
+    translation.set_subsettings_bad_names_allowed_chars_text(flk!("subsettings_bad_names_allowed_chars").into());
+    translation.set_subsettings_bad_names_remove_duplicated_text(flk!("subsettings_bad_names_remove_duplicated").into());
+    translation.set_subsettings_bad_names_remove_duplicated_hint_text(flk!("subsettings_bad_names_remove_duplicated_hint").into());
+    translation.set_subsettings_video_optimizer_mode_text(flk!("subsettings_video_optimizer_mode").into());
+    translation.set_subsettings_video_optimizer_crop_type_text(flk!("subsettings_video_optimizer_crop_type").into());
+    translation.set_subsettings_video_optimizer_black_pixel_threshold_text(flk!("subsettings_video_optimizer_black_pixel_threshold").into());
+    translation.set_subsettings_video_optimizer_black_pixel_threshold_hint_text(flk!("subsettings_video_optimizer_black_pixel_threshold_hint").into());
+    translation.set_subsettings_video_optimizer_black_bar_min_percentage_text(flk!("subsettings_video_optimizer_black_bar_min_percentage").into());
+    translation.set_subsettings_video_optimizer_black_bar_min_percentage_hint_text(flk!("subsettings_video_optimizer_black_bar_min_percentage_hint").into());
+    translation.set_subsettings_video_optimizer_max_samples_text(flk!("subsettings_video_optimizer_max_samples").into());
+    translation.set_subsettings_video_optimizer_max_samples_hint_text(flk!("subsettings_video_optimizer_max_samples_hint").into());
+    translation.set_subsettings_video_optimizer_min_crop_size_text(flk!("subsettings_video_optimizer_min_crop_size").into());
+    translation.set_subsettings_video_optimizer_min_crop_size_hint_text(flk!("subsettings_video_optimizer_min_crop_size_hint").into());
+    translation.set_subsettings_video_optimizer_video_codec_text(flk!("subsettings_video_optimizer_video_codec").into());
+    translation.set_subsettings_video_optimizer_excluded_codecs_text(flk!("subsettings_video_optimizer_excluded_codecs").into());
+    translation.set_subsettings_video_optimizer_video_quality_text(flk!("subsettings_video_optimizer_video_quality").into());
+    translation.set_subsettings_video_optimizer_hardware_encoder_text(flk!("subsettings_video_optimizer_hardware_encoder").into());
+    translation.set_subsettings_video_optimizer_noise_reduction_text(flk!("subsettings_video_optimizer_noise_reduction").into());
+    translation.set_subsettings_video_optimizer_noise_reduction_strength_text(flk!("subsettings_video_optimizer_noise_reduction_strength").into());
+    translation.set_subsettings_video_optimizer_use_custom_command_text(flk!("subsettings_video_optimizer_use_custom_command").into());
+    translation.set_subsettings_video_optimizer_custom_command_hint_text(flk!("subsettings_video_optimizer_custom_command_hint").into());
+    translation.set_subsettings_video_optimizer_generate_template_text(flk!("subsettings_video_optimizer_generate_template").into());
+    translation.set_subsettings_reset_text(flk!("subsettings_reset").into());
+    translation.set_subsettings_exif_ignored_tags_text(flk!("subsettings_exif_ignored_tags_text").into());
+    translation.set_subsettings_exif_ignored_tags_hint_text(flk!("subsettings_exif_ignored_tags_hint_text").into());
+    translation.set_subsettings_temporary_files_extensions_text(flk!("subsettings_temporary_files_extensions_text").into());
+    translation.set_subsettings_temporary_files_extensions_hint_text(flk!("subsettings_temporary_files_extensions_hint_text").into());
+    translation.set_clean_button_text(flk!("clean_button_text").into());
+    translation.set_clean_text(flk!("clean_text").into());
+    translation.set_clean_confirmation_text(flk!("clean_confirmation_text").into());
+    translation.set_crop_videos_text(flk!("crop_videos_text").into());
+    translation.set_crop_video_confirmation_text(flk!("crop_video_confirmation_text").into());
+    translation.set_crop_reencode_video_text(flk!("crop_reencode_video_text").into());
+    translation.set_reencode_videos_text(flk!("reencode_videos_text").into());
+    translation.set_optimize_button_text(flk!("optimize_button_text").into());
+    translation.set_optimize_confirmation_text(flk!("optimize_confirmation_text").into());
+    translation.set_optimize_fail_if_bigger_text(flk!("optimize_fail_if_bigger_text").into());
+    translation.set_optimize_overwrite_files_text(flk!("optimize_overwrite_files_text").into());
+    translation.set_optimize_limit_video_size_text(flk!("optimize_limit_video_size_text").into());
+    translation.set_optimize_max_width_text(flk!("optimize_max_width_text").into());
+    translation.set_optimize_max_height_text(flk!("optimize_max_height_text").into());
+    translation.set_optimize_crf_hint_text(flk!("optimize_crf_hint").into());
+    translation.set_optimize_noise_reduction_hint_text(flk!("optimize_noise_reduction_hint").into());
+    translation.set_optimize_noise_reduction_strength_hint_text(flk!("optimize_noise_reduction_strength_hint").into());
+    translation.set_hardlink_button_text(flk!("hardlink_button_text").into());
+    translation.set_hardlink_text(flk!("hardlink_text").into());
+    translation.set_hardlink_confirmation_text(flk!("hardlink_confirmation_text").into());
+    translation.set_softlink_button_text(flk!("softlink_button_text").into());
+    translation.set_softlink_text(flk!("softlink_text").into());
+    translation.set_softlink_confirmation_text(flk!("softlink_confirmation_text").into());
+    translation.set_move_confirmation_text(flk!("move_confirmation_text").into());
+    translation.set_rename_confirmation_text(flk!("rename_confirmation_text").into());
+    translation.set_settings_excluded_items_text(flk!("settings_excluded_items").into());
+    translation.set_settings_allowed_extensions_text(flk!("settings_allowed_extensions").into());
+    translation.set_settings_excluded_extensions_text(flk!("settings_excluded_extensions").into());
+    translation.set_settings_file_size_text(flk!("settings_file_size").into());
+    translation.set_settings_minimum_file_size_text(flk!("settings_minimum_file_size").into());
+    translation.set_settings_maximum_file_size_text(flk!("settings_maximum_file_size").into());
+    translation.set_settings_recursive_search_text(flk!("settings_recursive_search").into());
+    translation.set_settings_use_cache_text(flk!("settings_use_cache").into());
+    translation.set_settings_save_as_json_text(flk!("settings_save_as_json").into());
+    translation.set_settings_ignore_other_filesystems_text(flk!("settings_ignore_other_filesystems").into());
+    translation.set_settings_thread_number_text(flk!("settings_thread_number").into());
+    translation.set_settings_restart_required_text(flk!("settings_restart_required").into());
+    translation.set_settings_duplicate_image_preview_text(flk!("settings_duplicate_image_preview").into());
+    translation.set_settings_similar_videos_preview_text(flk!("settings_video_thumbnails_preview").into());
+    translation.set_settings_similar_videos_preview_hint_text(flk!("settings_similar_videos_preview_hint").into());
+    translation.set_settings_application_scale_text(flk!("settings_application_scale_text").into());
+    translation.set_settings_application_scale_hint_text(flk!("settings_application_scale_hint_text").into());
+    translation.set_settings_restart_required_scale_text(flk!("settings_restart_required_scale_text").into());
+    translation.set_settings_use_manual_application_scale_text(flk!("settings_use_manual_application_scale_text").into());
+    translation.set_settings_duplicate_minimal_hash_cache_size_text(flk!("settings_duplicate_minimal_hash_cache_size").into());
+    translation.set_settings_duplicate_use_prehash_text(flk!("settings_duplicate_use_prehash").into());
+    translation.set_settings_duplicate_minimal_prehash_cache_size_text(flk!("settings_duplicate_minimal_prehash_cache_size").into());
+    translation.set_settings_delete_outdated_cache_entries_text(flk!("settings_delete_outdated_cache_entries").into());
+    translation.set_settings_delete_outdated_cache_entries_hint_text(flk!("settings_delete_outdated_cache_entries_hint").into());
+    translation.set_settings_hide_hard_links_text(flk!("settings_hide_hard_links").into());
+    translation.set_settings_hide_hard_links_hint_text(flk!("settings_hide_hard_links_hint").into());
+    translation.set_settings_similar_images_show_image_preview_text(flk!("settings_similar_images_show_image_preview").into());
+    translation.set_settings_open_config_folder_text(flk!("settings_open_config_folder").into());
+    translation.set_settings_open_cache_folder_text(flk!("settings_open_cache_folder").into());
+    translation.set_settings_language_text(flk!("settings_language").into());
+    translation.set_settings_current_preset_text(flk!("settings_current_preset").into());
+    translation.set_settings_edit_name_text(flk!("settings_edit_name").into());
+    translation.set_settings_choose_name_for_prefix_text(flk!("settings_choose_name_for_prefix").into());
+    translation.set_settings_save_text(flk!("settings_save").into());
+    translation.set_settings_load_text(flk!("settings_load").into());
+    translation.set_settings_reset_text(flk!("settings_reset").into());
+    translation.set_settings_similar_videos_tool_text(flk!("settings_similar_videos_tool").into());
+    translation.set_settings_video_thumbnails_clear_unused_thumbnails_text(flk!("settings_video_thumbnails_clear_unused_thumbnails").into());
+    translation.set_settings_video_thumbnails_header_text(flk!("settings_video_thumbnails_header").into());
+    translation.set_settings_video_thumbnails_generate_text(flk!("settings_video_thumbnails_generate").into());
+    translation.set_settings_video_thumbnails_position_text(flk!("settings_video_thumbnails_position").into());
+    translation.set_settings_video_thumbnails_generate_grid_text(flk!("settings_video_thumbnails_generate_grid").into());
+    translation.set_settings_video_thumbnails_generate_grid_hint_text(flk!("settings_video_thumbnails_generate_grid_hint").into());
+    translation.set_settings_video_thumbnails_grid_tiles_per_side_text(flk!("settings_video_thumbnails_grid_tiles_per_side").into());
+    translation.set_settings_video_thumbnails_grid_tiles_per_side_hint_text(flk!("settings_video_thumbnails_grid_tiles_per_side_hint").into());
+    translation.set_settings_similar_images_tool_text(flk!("settings_similar_images_tool").into());
+    translation.set_settings_general_settings_text(flk!("settings_general_settings").into());
+    translation.set_settings_settings_text(flk!("settings_settings").into());
+    translation.set_popup_save_title_text(flk!("popup_save_title").into());
+    translation.set_popup_save_message_text(flk!("popup_save_message").into());
+    translation.set_popup_rename_title_text(flk!("popup_rename_title").into());
+    translation.set_popup_rename_single_title_text(flk!("popup_rename_single_title").into());
+    translation.set_popup_rename_single_same_name_text(flk!("popup_rename_single_same_name").into());
+    translation.set_popup_rename_single_target_exists_text(flk!("popup_rename_single_target_exists").into());
+    translation.set_popup_error_title_text(flk!("popup_error_title").into());
+    translation.set_popup_new_directories_title_text(flk!("popup_new_paths_title").into());
+    translation.set_popup_move_title_text(flk!("popup_move_title").into());
+    translation.set_popup_move_copy_checkbox_text(flk!("popup_move_copy_checkbox").into());
+    translation.set_popup_move_preserve_folder_checkbox_text(flk!("popup_move_preserve_folder_checkbox").into());
+    translation.set_popup_move_rename_on_conflict_checkbox_text(flk!("popup_move_rename_on_conflict_checkbox").into());
+    translation.set_delete_text(flk!("delete").into());
+    translation.set_delete_confirmation_text(flk!("rust_delete_confirmation").into());
+    translation.set_trash_text(flk!("trash").into());
+    translation.set_trash_confirmation_text(flk!("rust_trash_confirmation").into());
+    translation.set_stopping_scan_text(flk!("stopping_scan").into());
+    translation.set_searching_text(flk!("searching").into());
+    translation.set_subsettings_videos_crop_detect_text(flk!("subsettings_videos_crop_detect").into());
+    translation.set_subsettings_videos_skip_forward_amount_text(flk!("subsettings_videos_skip_forward_amount").into());
+    translation.set_subsettings_videos_vid_hash_duration_text(flk!("subsettings_videos_vid_hash_duration").into());
+    translation.set_subsettings_videos_window_count_text(flk!("subsettings_videos_window_count").into());
+    translation.set_settings_load_tabs_sizes_at_startup_text(flk!("settings_load_tabs_sizes_at_startup").into());
+    translation.set_settings_load_windows_size_at_startup_text(flk!("settings_load_windows_size_at_startup").into());
+    translation.set_settings_limit_lines_of_messages_text(flk!("settings_limit_lines_of_messages").into());
+    translation.set_settings_play_audio_on_scan_completion_text(flk!("settings_play_audio_on_scan_completion_text").into());
+    translation.set_settings_audio_feature_hint_text(flk!("settings_audio_feature_hint_text").into());
+    translation.set_settings_audio_env_variable_hint_text(flk!("settings_audio_env_variable_hint_text").into());
+    translation.set_settings_show_notification_on_scan_completion_text(flk!("settings_show_notification_on_scan_completion_text").into());
+    translation.set_settings_notification_feature_hint_text(flk!("settings_notification_feature_hint_text").into());
+    translation.set_settings_notification_focused_hint_text(flk!("settings_notification_focused_hint_text").into());
+    translation.set_settings_cache_number_size_text("".into());
+    translation.set_settings_video_thumbnails_number_size_text("".into());
+    translation.set_settings_log_number_size_text("".into());
+    translation.set_clean_exif_overwrite_files_text(flk!("clean_exif_overwrite_files_text").into());
+    translation.set_stop_text(flk!("stop_text").into());
+    translation.set_settings_cache_header_text(flk!("settings_cache_header_text").into());
+    translation.set_settings_select_header_text(flk!("settings_select_header_text").into());
+    translation.set_settings_select_group_size_text(flk!("settings_select_group_size_text").into());
+    translation.set_settings_select_group_date_text(flk!("settings_select_group_date_text").into());
+    translation.set_settings_select_group_resolution_text(flk!("settings_select_group_resolution_text").into());
+    translation.set_settings_select_group_path_text(flk!("settings_select_group_path_text").into());
+    translation.set_settings_select_label_one_smallest_text(flk!("settings_select_label_one_smallest_text").into());
+    translation.set_settings_select_label_one_biggest_text(flk!("settings_select_label_one_biggest_text").into());
+    translation.set_settings_select_label_except_smallest_text(flk!("settings_select_label_except_smallest_text").into());
+    translation.set_settings_select_label_except_biggest_text(flk!("settings_select_label_except_biggest_text").into());
+    translation.set_settings_select_label_one_oldest_text(flk!("settings_select_label_one_oldest_text").into());
+    translation.set_settings_select_label_one_newest_text(flk!("settings_select_label_one_newest_text").into());
+    translation.set_settings_select_label_except_oldest_text(flk!("settings_select_label_except_oldest_text").into());
+    translation.set_settings_select_label_except_newest_text(flk!("settings_select_label_except_newest_text").into());
+    translation.set_settings_select_label_shortest_text(flk!("settings_select_label_shortest_text").into());
+    translation.set_settings_select_label_longest_text(flk!("settings_select_label_longest_text").into());
+    translation.set_settings_select_label_except_shortest_text(flk!("settings_select_label_except_shortest_text").into());
+    translation.set_settings_select_label_except_longest_text(flk!("settings_select_label_except_longest_text").into());
+    translation.set_settings_clean_cache_button_text(flk!("settings_clean_cache_button_text").into());
+    translation.set_popup_clean_cache_title_text(flk!("popup_clean_cache_title_text").into());
+    translation.set_popup_clean_cache_confirmation_text(flk!("popup_clean_cache_confirmation_text").into());
+    translation.set_popup_clean_cache_progress_text(flk!("popup_clean_cache_progress_text").into());
+    translation.set_popup_clean_cache_current_file_text(flk!("popup_clean_cache_current_file_text").into());
+    translation.set_popup_clean_cache_file_progress_text(flk!("popup_clean_cache_file_progress_text").into());
+    translation.set_popup_clean_cache_overall_progress_text(flk!("popup_clean_cache_overall_progress_text").into());
+    translation.set_popup_clean_cache_stopped_by_user_text(flk!("popup_clean_cache_stopped_by_user_text").into());
+    translation.set_popup_clean_cache_finished_text(flk!("popup_clean_cache_finished_text").into());
+    translation.set_popup_clean_cache_error_details_text(flk!("popup_clean_cache_error_details_text").into());
+    translation.set_popup_clean_cache_files_with_errors(flk!("popup_clean_cache_files_with_errors").into());
+    translation.set_popup_custom_select_title_text(flk!("popup_custom_select_title_text").into());
+    translation.set_popup_custom_select_button_text(flk!("popup_custom_select_button_text").into());
+    translation.set_popup_custom_unselect_button_text(flk!("popup_custom_unselect_button_text").into());
+    translation.set_popup_custom_column_name_header_text(flk!("popup_custom_column_name_header_text").into());
+    translation.set_popup_custom_filter_value_header_text(flk!("popup_custom_filter_value_header_text").into());
+    translation.set_popup_custom_hint_str_text(flk!("popup_custom_hint_str_text").into());
+    translation.set_popup_custom_hint_int_text(flk!("popup_custom_hint_int_text").into());
+    translation.set_popup_custom_hint_date_text(flk!("popup_custom_hint_date_text").into());
+    translation.set_popup_custom_case_sensitive_text(flk!("popup_custom_case_sensitive_text").into());
+    translation.set_popup_custom_leave_one_in_group_text(flk!("popup_custom_leave_one_in_group_text").into());
+    translation.set_popup_custom_save_restore_text(flk!("popup_custom_save_restore_text").into());
+
+    translation.set_compare_button_text(flk!("compare_button_text").into());
+    translation.set_compare_back_text(flk!("compare_back_text").into());
+    translation.set_compare_prev_group_text(flk!("compare_prev_group_text").into());
+    translation.set_compare_next_group_text(flk!("compare_next_group_text").into());
+    translation.set_compare_swap_text(flk!("compare_swap_text").into());
+    translation.set_compare_info_text(flk!("compare_info_text").into());
+    translation.set_compare_diff_text(flk!("compare_diff_text").into());
+    translation.set_compare_split_text(flk!("compare_split_text").into());
+    translation.set_compare_overlay_text(flk!("compare_overlay_text").into());
+    translation.set_compare_loading_title_text(flk!("compare_loading_title_text").into());
+    translation.set_compare_cancel_text(flk!("compare_cancel_text").into());
+    translation.set_compare_resolution_mismatch_text(flk!("compare_resolution_mismatch_text").into());
+    translation.set_compare_computing_diff_text(flk!("compare_computing_diff_text").into());
+    translation.set_compare_info_file_name_text(flk!("compare_info_file_name_text").into());
+    translation.set_compare_info_path_text(flk!("compare_info_path_text").into());
+    translation.set_compare_info_size_text(flk!("compare_info_size_text").into());
+    translation.set_compare_info_resolution_text(flk!("compare_info_resolution_text").into());
+    translation.set_compare_info_modification_date_text(flk!("compare_info_modification_date_text").into());
+    translation.set_compare_loading_images_text(flk!("compare_loading_images_text").into());
+    translation.set_compare_cancelling_text(flk!("compare_cancelling_text").into());
+
+    translation.set_context_menu_open_item_text(flk!("context_menu_open_item_text").into());
+    translation.set_context_menu_open_parent_text(flk!("context_menu_open_parent_text").into());
+    translation.set_context_menu_remove_from_results_text(flk!("context_menu_remove_from_results_text").into());
+    translation.set_context_menu_remove_all_from_folder_text(flk!("context_menu_remove_all_from_folder_text").into());
+    translation.set_context_menu_remove_all_from_folder_recursive_text(flk!("context_menu_remove_all_from_folder_recursive_text").into());
+    translation.set_context_menu_select_all_from_folder_text(flk!("context_menu_select_all_from_folder_text").into());
+    translation.set_context_menu_select_all_from_folder_recursive_text(flk!("context_menu_select_all_from_folder_recursive_text").into());
+    translation.set_context_menu_exclude_parent_folder_text(flk!("context_menu_exclude_parent_folder_text").into());
+    translation.set_context_menu_exclude_item_text(flk!("context_menu_exclude_item_text").into());
+    translation.set_context_menu_copy_file_name_text(flk!("context_menu_copy_file_name_text").into());
+    translation.set_context_menu_copy_parent_folder_path_text(flk!("context_menu_copy_parent_folder_path_text").into());
+    translation.set_context_menu_copy_full_path_text(flk!("context_menu_copy_full_path_text").into());
+    translation.set_context_menu_rename_text(flk!("context_menu_rename_text").into());
+
+    let tools_model: [(SharedString, ActiveTab); TOOLS_NUMBER] = [
+        (flk!("tool_duplicate_files").into(), ActiveTab::DuplicateFiles),
+        (flk!("tool_empty_folders").into(), ActiveTab::EmptyFolders),
+        (flk!("tool_big_files").into(), ActiveTab::BigFiles),
+        (flk!("tool_empty_files").into(), ActiveTab::EmptyFiles),
+        (flk!("tool_temporary_files").into(), ActiveTab::TemporaryFiles),
+        (flk!("tool_similar_images").into(), ActiveTab::SimilarImages),
+        (flk!("tool_similar_videos").into(), ActiveTab::SimilarVideos),
+        (flk!("tool_music_duplicates").into(), ActiveTab::SimilarMusic),
+        (flk!("tool_invalid_symlinks").into(), ActiveTab::InvalidSymlinks),
+        (flk!("tool_broken_files").into(), ActiveTab::BrokenFiles),
+        (flk!("tool_bad_extensions").into(), ActiveTab::BadExtensions),
+        (flk!("tool_bad_names").into(), ActiveTab::BadNames),
+        (flk!("tool_exif_remover").into(), ActiveTab::ExifRemover),
+        (flk!("tool_video_optimizer").into(), ActiveTab::VideoOptimizer),
+    ];
+    let gui_state = app.global::<GuiState>();
+    gui_state.set_tools_model(ModelRc::new(VecModel::from(tools_model.to_vec())));
+
+    let sort_model: [SortModel; 3] = [
+        SortModel {
+            data: SortMode::FullName,
+            name: flk!("sort_by_full_name").into(),
+        },
+        SortModel {
+            data: SortMode::Focus,
+            name: flk!("sort_by_focus").into(),
+        },
+        SortModel {
+            data: SortMode::Reverse,
+            name: flk!("sort_reverse").into(),
+        },
+    ];
+
+    gui_state.set_sort_results_list(ModelRc::new(VecModel::from(sort_model.to_vec())));
+
+    let selection = flk!("column_selection");
+    let size = flk!("column_size");
+    let file_name = flk!("column_file_name");
+    let path = flk!("column_path");
+    let mod_date = flk!("column_modification_date");
+    let similarity = flk!("column_similarity");
+    let dimensions = flk!("column_dimensions");
+    let title = flk!("column_title");
+    let artist = flk!("column_artist");
+    let year = flk!("column_year");
+    let bitrate = flk!("column_bitrate");
+    let length = flk!("column_length");
+    let genre = flk!("column_genre");
+    let fps = flk!("column_fps");
+    let codec = flk!("column_codec");
+    let duration = flk!("column_duration");
+    let type_of_error = flk!("column_type_of_error");
+    let symlink_name = flk!("column_symlink_name");
+    let symlink_folder = flk!("column_symlink_folder");
+    let destination_path = flk!("column_destination_path");
+    let current_extension = flk!("column_current_extension");
+    let proper_extension = flk!("column_proper_extension");
+    let exif_tags = flk!("column_exif_tags");
+    let new_dimensions = flk!("column_new_dimensions");
+    let new_name = flk!("column_new_name");
+
+    let fnm = |model: &[&str]| {
+        let shared_string = model.iter().map(|s| (*s).into()).collect::<Vec<SharedString>>();
+        ModelRc::new(VecModel::from(shared_string))
+    };
+
+    settings.set_duplicates_column_name(fnm(&[&selection, &size, &file_name, &path, &mod_date]));
+    settings.set_empty_folders_column_name(fnm(&[&selection, &file_name, &path, &mod_date]));
+    settings.set_empty_files_column_name(fnm(&[&selection, &size, &file_name, &path, &mod_date]));
+    settings.set_temporary_files_column_name(fnm(&[&selection, &size, &file_name, &path, &mod_date]));
+    settings.set_big_files_column_name(fnm(&[&selection, &size, &file_name, &path, &mod_date]));
+    settings.set_similar_images_column_name(fnm(&[&selection, &similarity, &size, &dimensions, &file_name, &path, &mod_date]));
+    settings.set_similar_videos_column_name(fnm(&[&selection, &size, &file_name, &path, &dimensions, &duration, &bitrate, &fps, &codec, &mod_date]));
+    settings.set_similar_music_column_name(fnm(&[&selection, &size, &file_name, &title, &artist, &year, &bitrate, &length, &genre, &path, &mod_date]));
+    settings.set_invalid_symlink_column_name(fnm(&[&selection, &symlink_name, &symlink_folder, &destination_path, &mod_date]));
+    settings.set_broken_files_column_name(fnm(&[&selection, &file_name, &path, &type_of_error, &size, &mod_date]));
+    settings.set_bad_extensions_column_name(fnm(&[&selection, &file_name, &path, &current_extension, &proper_extension]));
+    settings.set_exif_remover_column_name(fnm(&[&selection, &size, &file_name, &path, &exif_tags, &mod_date]));
+    settings.set_video_optimizer_column_name(fnm(&[&selection, &size, &file_name, &path, &codec, &dimensions, &new_dimensions, &mod_date]));
+    settings.set_bad_names_column_name(fnm(&[&selection, &file_name, &new_name, &path]));
+
+    crate::set_initial_gui_info::apply_combo_box_translations(app);
+}
+
+pub(crate) fn translate_select_mode(select_mode: SelectMode) -> SharedString {
+    match select_mode {
+        SelectMode::SelectAll => flk!("selection_all").into(),
+        SelectMode::UnselectAll => flk!("selection_deselect_all").into(),
+        SelectMode::InvertSelection => flk!("selection_invert_selection").into(),
+        SelectMode::InvertSelectionInGroup => flk!("selection_invert_selection_in_group").into(),
+        SelectMode::SelectTheBiggestSize => flk!("selection_the_biggest_size").into(),
+        SelectMode::SelectTheBiggestResolution => flk!("selection_the_biggest_resolution").into(),
+        SelectMode::SelectTheSmallestSize => flk!("selection_the_smallest_size").into(),
+        SelectMode::SelectTheSmallestResolution => flk!("selection_the_smallest_resolution").into(),
+        SelectMode::SelectNewest => flk!("selection_newest").into(),
+        SelectMode::SelectOldest => flk!("selection_oldest").into(),
+        SelectMode::SelectShortestPath => flk!("selection_shortest_path").into(),
+        SelectMode::SelectLongestPath => flk!("selection_longest_path").into(),
+        SelectMode::SelectAllExceptBiggestSize => flk!("selection_all_except_biggest_size").into(),
+        SelectMode::SelectAllExceptSmallestSize => flk!("selection_all_except_smallest_size").into(),
+        SelectMode::SelectAllExceptBiggestResolution => flk!("selection_all_except_biggest_resolution").into(),
+        SelectMode::SelectAllExceptSmallestResolution => flk!("selection_all_except_smallest_resolution").into(),
+        SelectMode::SelectAllExceptNewest => flk!("selection_all_except_newest").into(),
+        SelectMode::SelectAllExceptOldest => flk!("selection_all_except_oldest").into(),
+        SelectMode::SelectAllExceptLongestPath => flk!("selection_all_except_longest_path").into(),
+        SelectMode::SelectAllExceptShortestPath => flk!("selection_all_except_shortest_path").into(),
+        SelectMode::SelectCustom => flk!("selection_custom_select_unselect").into(),
+    }
+}
+
+pub(crate) fn translate_sort_mode(sort_mode: SortMode) -> SharedString {
+    match sort_mode {
+        SortMode::FullName => flk!("sort_by_full_name").into(),
+        SortMode::Focus => flk!("sort_by_focus").into(),
+        SortMode::Reverse => flk!("sort_reverse").into(),
+    }
+}
+
+fn apply_similar_videos_audio_preset(app: &MainWindow) {
+    let settings = app.global::<Settings>();
+    let idx = settings.get_similar_videos_audio_preset_index();
+    let items = StringComboBoxItems::get_items();
+    let preset = items.similar_videos_audio_preset.get(idx as usize).map(|i| i.value);
+    drop(items);
+    let Some(preset) = preset else { return };
+    match preset {
+        SimilarVideosAudioPreset::Custom => {}
+        SimilarVideosAudioPreset::Identical => {
+            settings.set_similar_videos_audio_similarity_percent(90.0);
+            settings.set_similar_videos_audio_length_ratio(0.85);
+            settings.set_similar_videos_audio_min_duration_seconds(5.0);
+            settings.set_similar_videos_audio_maximum_difference(2.0);
+        }
+        SimilarVideosAudioPreset::Clip => {
+            settings.set_similar_videos_audio_similarity_percent(80.0);
+            settings.set_similar_videos_audio_length_ratio(0.05);
+            settings.set_similar_videos_audio_min_duration_seconds(10.0);
+            settings.set_similar_videos_audio_maximum_difference(3.0);
+        }
+        SimilarVideosAudioPreset::Similar => {
+            settings.set_similar_videos_audio_similarity_percent(25.0);
+            settings.set_similar_videos_audio_length_ratio(0.4);
+            settings.set_similar_videos_audio_min_duration_seconds(10.0);
+            settings.set_similar_videos_audio_maximum_difference(6.0);
+        }
+    }
+}
+
+fn apply_similar_videos_visual_preset(app: &MainWindow) {
+    let settings = app.global::<Settings>();
+    let idx = settings.get_similar_videos_visual_preset_index();
+    let items = StringComboBoxItems::get_items();
+    let preset = items.similar_videos_visual_preset.get(idx as usize).map(|i| i.value);
+    drop(items);
+    let Some(preset) = preset else { return };
+    match preset {
+        SimilarVideosVisualPreset::Custom => {}
+        // Near-identical: strict tolerance, dense sampling, default skip.
+        SimilarVideosVisualPreset::NearIdentical => {
+            settings.set_similar_videos_sub_current_similarity(3.0);
+            settings.set_similar_videos_window_count(8.0);
+            settings.set_similar_videos_skip_forward_amount(15.0);
+            settings.set_similar_videos_vid_hash_duration(10.0);
+            settings.set_similar_videos_crop_detect(true);
+            settings.set_similar_videos_duration_tolerance_pct(10.0);
+            settings.set_similar_videos_min_matching_windows(0.8);
+            settings.set_similar_videos_subclip_min_match(0.7);
+        }
+        // Similar: loose tolerance, moderate sampling.
+        SimilarVideosVisualPreset::Similar => {
+            settings.set_similar_videos_sub_current_similarity(14.0);
+            settings.set_similar_videos_window_count(5.0);
+            settings.set_similar_videos_skip_forward_amount(15.0);
+            settings.set_similar_videos_vid_hash_duration(10.0);
+            settings.set_similar_videos_crop_detect(true);
+            settings.set_similar_videos_duration_tolerance_pct(25.0);
+            settings.set_similar_videos_min_matching_windows(0.5);
+            settings.set_similar_videos_subclip_min_match(0.4);
+        }
+        // Movies: large skip (past intros), many windows, longer hash duration.
+        SimilarVideosVisualPreset::Movies => {
+            settings.set_similar_videos_sub_current_similarity(8.0);
+            settings.set_similar_videos_window_count(8.0);
+            settings.set_similar_videos_skip_forward_amount(90.0);
+            settings.set_similar_videos_vid_hash_duration(12.0);
+            settings.set_similar_videos_crop_detect(true);
+            settings.set_similar_videos_duration_tolerance_pct(15.0);
+            settings.set_similar_videos_min_matching_windows(0.6);
+            settings.set_similar_videos_subclip_min_match(0.5);
+        }
+    }
+}

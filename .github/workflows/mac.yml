@@ -1,0 +1,146 @@
+name: 🍎 MacOS
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CZKAWKA_OFFICIAL_BUILD: ${{ vars.CZKAWKA_OFFICIAL_BUILD }}
+
+jobs:
+  macos:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup env
+        run: |
+          ARCHNAME=$([ "${{ runner.arch }}" = "ARM64" ] && echo arm64 || echo x86_64)
+          echo "ARCHNAME=$ARCHNAME" >> $GITHUB_ENV
+
+      - name: Setup rust version
+        run: rustup default 1.94.1
+
+      - name: Install Homebrew
+        run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+      - name: Install GTK4
+        run: |
+          brew install gtk4 libheif libavif dav1d || true
+
+      - name: Build Release
+        if: ${{ github.ref == 'refs/heads/master' }}
+        run: |
+          set -e
+          sed -i '' 's/#lto = "thin"/lto = "thin"/g' Cargo.toml
+          sed -i '' 's/#codegen-units /codegen-units /g' Cargo.toml
+          
+          echo "VERS=release" >> $GITHUB_ENV
+          
+          export LIBRARY_PATH=$LIBRARY_PATH:$(brew --prefix)/lib
+          
+          cargo build --release
+          mv target/release/czkawka_cli mac_czkawka_cli_${{ env.ARCHNAME }}
+          mv target/release/czkawka_gui mac_czkawka_gui_${{ env.ARCHNAME }}
+          mv target/release/krokiet mac_krokiet_${{ env.ARCHNAME }}
+          cargo build --release --bin krokiet --no-default-features --features "winit_skia_vulkan,winit_software"
+          mv target/release/krokiet mac_krokiet_skia_vulkan_${{ env.ARCHNAME }}
+          cargo build --release --bin krokiet --no-default-features --features "femtovg_wgpu"
+          mv target/release/krokiet mac_krokiet_femtovg_wgpu_${{ env.ARCHNAME }}
+          cargo build --release --bin krokiet --no-default-features --features "winit_femtovg,winit_skia_opengl,winit_skia_vulkan,winit_software,femtovg_wgpu"
+          mv target/release/krokiet mac_krokiet_all_backends_${{ env.ARCHNAME }}
+          
+          cargo build --release --features "heif,libavif"
+          mv target/release/czkawka_cli mac_czkawka_cli_heif_avif_${{ env.ARCHNAME }}
+          mv target/release/czkawka_gui mac_czkawka_gui_heif_avif_${{ env.ARCHNAME }}
+          mv target/release/krokiet mac_krokiet_heif_avif_${{ env.ARCHNAME }}
+          cargo build --release --bin krokiet --no-default-features --features "winit_skia_vulkan,winit_software,heif,libavif"
+          mv target/release/krokiet mac_krokiet_skia_vulkan_heif_avif_${{ env.ARCHNAME }}
+          cargo build --release --bin krokiet --no-default-features --features "femtovg_wgpu,heif,libavif"
+          mv target/release/krokiet mac_krokiet_heif_avif_femtovg_wgpu_${{ env.ARCHNAME }}
+          cargo build --release --bin krokiet --no-default-features --features "winit_femtovg,winit_skia_opengl,winit_skia_vulkan,winit_software,femtovg_wgpu,heif,libavif"
+          mv target/release/krokiet mac_krokiet_heif_avif_all_backends_${{ env.ARCHNAME }}
+
+      - name: Build Debug
+        if: ${{ github.ref != 'refs/heads/master' }}
+        run: |
+          set -e
+          sed -i '' 's/^\(\[profile\.dev\.package.*\)/#\1/' Cargo.toml
+          sed -i '' 's|^opt-level = 3 # OPT PACKAGES|#opt-level = 3 # OPT PACKAGES|' Cargo.toml
+          
+          echo "VERS=debug" >> $GITHUB_ENV
+          
+          export LIBRARY_PATH=$LIBRARY_PATH:$(brew --prefix)/lib
+          
+          cargo build --profile fastci
+          mv target/fastci/czkawka_cli mac_czkawka_cli_${{ env.ARCHNAME }}
+          mv target/fastci/czkawka_gui mac_czkawka_gui_${{ env.ARCHNAME }}
+          mv target/fastci/krokiet mac_krokiet_${{ env.ARCHNAME }}
+          cargo build --profile fastci --bin krokiet --no-default-features --features "winit_skia_vulkan,winit_software"
+          mv target/fastci/krokiet mac_krokiet_skia_vulkan_${{ env.ARCHNAME }}
+          cargo build --profile fastci --bin krokiet --no-default-features --features "femtovg_wgpu"
+          mv target/fastci/krokiet mac_krokiet_femtovg_wgpu_${{ env.ARCHNAME }}
+          cargo build --profile fastci --bin krokiet --no-default-features --features "winit_femtovg,winit_skia_opengl,winit_skia_vulkan,winit_software,femtovg_wgpu"
+          mv target/fastci/krokiet mac_krokiet_all_backends_${{ env.ARCHNAME }}
+          
+          cargo build --profile fastci --features "heif,libavif"
+          mv target/fastci/czkawka_cli mac_czkawka_cli_heif_avif_${{ env.ARCHNAME }}
+          mv target/fastci/czkawka_gui mac_czkawka_gui_heif_avif_${{ env.ARCHNAME }}
+          mv target/fastci/krokiet mac_krokiet_heif_avif_${{ env.ARCHNAME }}
+          cargo build --profile fastci --bin krokiet --no-default-features --features "winit_skia_vulkan,winit_software,heif,libavif"
+          mv target/fastci/krokiet mac_krokiet_skia_vulkan_heif_avif_${{ env.ARCHNAME }}
+          cargo build --profile fastci --bin krokiet --no-default-features --features "femtovg_wgpu,heif,libavif"
+          mv target/fastci/krokiet mac_krokiet_heif_avif_femtovg_wgpu_${{ env.ARCHNAME }}
+          cargo build --profile fastci --bin krokiet --no-default-features --features "winit_femtovg,winit_skia_opengl,winit_skia_vulkan,winit_software,femtovg_wgpu,heif,libavif"
+          mv target/fastci/krokiet mac_krokiet_heif_avif_all_backends_${{ env.ARCHNAME }}
+
+      - name: Package krokiet with launchers
+        run: |
+          bash misc/pack_all_backends.sh mac_krokiet_all_backends_${{ env.ARCHNAME }} mac_krokiet_all_backends_${{ env.ARCHNAME }}.zip
+          bash misc/pack_all_backends.sh mac_krokiet_heif_avif_all_backends_${{ env.ARCHNAME }} mac_krokiet_heif_avif_all_backends_${{ env.ARCHNAME }}.zip
+
+      - name: Store MacOS
+        uses: actions/upload-artifact@v6
+        with:
+          name: all-${{ runner.os }}-${{ runner.arch }}-${{ env.VERS }}
+          path: |
+            mac_krokiet_all_backends_${{ env.ARCHNAME }}.zip
+            mac_czkawka_cli_heif_avif_${{ env.ARCHNAME }}
+            mac_czkawka_gui_heif_avif_${{ env.ARCHNAME }}
+            mac_krokiet_heif_avif_${{ env.ARCHNAME }}
+            mac_krokiet_heif_avif_femtovg_wgpu_${{ env.ARCHNAME }}
+            mac_krokiet_heif_avif_all_backends_${{ env.ARCHNAME }}.zip
+            mac_czkawka_cli_${{ env.ARCHNAME }}
+            mac_czkawka_gui_${{ env.ARCHNAME }}
+            mac_krokiet_${{ env.ARCHNAME }}
+            mac_krokiet_skia_vulkan_heif_avif_${{ env.ARCHNAME }}
+            mac_krokiet_skia_vulkan_${{ env.ARCHNAME }}
+            mac_krokiet_femtovg_wgpu_${{ env.ARCHNAME }}
+
+      - name: Release
+        if: ${{ github.ref == 'refs/heads/master' && vars.HAVE_PAT_REPOSITORY_TOKEN == '1' }}
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: "Nightly"
+          files: |
+            mac_krokiet_all_backends_${{ env.ARCHNAME }}.zip
+            mac_czkawka_cli_heif_avif_${{ env.ARCHNAME }}
+            mac_czkawka_gui_heif_avif_${{ env.ARCHNAME }}
+            mac_krokiet_heif_avif_${{ env.ARCHNAME }}
+            mac_krokiet_heif_avif_femtovg_wgpu_${{ env.ARCHNAME }}
+            mac_krokiet_heif_avif_all_backends_${{ env.ARCHNAME }}.zip
+            mac_czkawka_cli_${{ env.ARCHNAME }}
+            mac_czkawka_gui_${{ env.ARCHNAME }}
+            mac_krokiet_${{ env.ARCHNAME }}
+            mac_krokiet_skia_vulkan_heif_avif_${{ env.ARCHNAME }}
+            mac_krokiet_skia_vulkan_${{ env.ARCHNAME }}
+            mac_krokiet_femtovg_wgpu_${{ env.ARCHNAME }}
+          token: ${{ secrets.PAT_REPOSITORY }}

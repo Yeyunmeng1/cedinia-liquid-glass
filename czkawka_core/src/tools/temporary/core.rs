@@ -1,0 +1,167 @@
+use std::fs::DirEntry;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+use crossbeam_channel::Sender;
+use fun_time::fun_time;
+use rayon::prelude::*;
+
+use crate::common::dir_traversal::{common_read_dir, get_modified_time};
+use crate::common::directories::Directories;
+use crate::common::items::ExcludedItems;
+use crate::common::model::{CheckingMethod, ToolType, WorkContinueStatus};
+use crate::common::progress_data::{ProgressData, ToolStage};
+use crate::common::progress_stop_handler::{check_if_stop_received, prepare_thread_handler_common};
+use crate::common::tool_data::CommonToolData;
+use crate::tools::temporary::{Info, Temporary, TemporaryFileEntry, TemporaryParameters};
+
+impl Temporary {
+    pub fn new(params: TemporaryParameters) -> Self {
+        Self {
+            common_data: CommonToolData::new(ToolType::TemporaryFiles),
+            information: Info::default(),
+            temporary_files: Vec::new(),
+            params,
+        }
+    }
+
+    #[fun_time(message = "check_files", level = "debug")]
+    pub(crate) fn check_files(&mut self, stop_flag: &Arc<AtomicBool>, progress_sender: Option<&Sender<ProgressData>>) -> WorkContinueStatus {
+        if self.params.extensions.is_empty() {
+            self.common_data.text_messages.critical = Some("No temporary file extensions defined. Add at least one extension to search for.".to_string());
+            return WorkContinueStatus::Stop;
+        }
+
+        let mut folders_to_check: Vec<PathBuf> = self.common_data.directories.included_directories.clone();
+
+        let progress_handler = prepare_thread_handler_common(progress_sender, ToolStage::CollectingFiles(CheckingMethod::None), 0, 0);
+
+        while !folders_to_check.is_empty() {
+            if check_if_stop_received(stop_flag) {
+                progress_handler.join_thread();
+                return WorkContinueStatus::Stop;
+            }
+
+            let segments: Vec<_> = folders_to_check
+                .into_par_iter()
+                .map(|current_folder| {
+                    let mut dir_result = Vec::new();
+                    let mut warnings = Vec::new();
+                    let mut fe_result = Vec::new();
+
+                    let Some(read_dir) = common_read_dir(&current_folder, &mut warnings) else {
+                        return (dir_result, warnings, fe_result);
+                    };
+
+                    // Check every sub folder/file/link etc.
+                    for entry in read_dir {
+                        let Ok(entry_data) = entry else {
+                            continue;
+                        };
+                        let Ok(file_type) = entry_data.file_type() else {
+                            continue;
+                        };
+
+                        if file_type.is_dir() {
+                            check_folder_children(
+                                &mut dir_result,
+                                &mut warnings,
+                                &entry_data,
+                                self.common_data.recursive_search,
+                                &self.common_data.directories,
+                                &self.common_data.excluded_items,
+                            );
+                        } else if file_type.is_file()
+                            && let Some(file_entry) = self.get_file_entry(progress_handler.items_counter(), &entry_data, &mut warnings)
+                        {
+                            fe_result.push(file_entry);
+                        }
+                    }
+                    (dir_result, warnings, fe_result)
+                })
+                .collect();
+
+            let required_size = segments.iter().map(|(segment, _, _)| segment.len()).sum::<usize>();
+            folders_to_check = Vec::with_capacity(required_size);
+
+            // Process collected data
+            for (segment, warnings, fe_result) in segments {
+                folders_to_check.extend(segment);
+                self.common_data.text_messages.warnings.extend(warnings);
+                for fe in fe_result {
+                    self.temporary_files.push(fe);
+                }
+            }
+        }
+
+        progress_handler.join_thread();
+        self.information.number_of_temporary_files = self.temporary_files.len();
+
+        WorkContinueStatus::Continue
+    }
+
+    pub(crate) fn get_file_entry(&self, items_counter: &Arc<AtomicUsize>, entry_data: &DirEntry, warnings: &mut Vec<String>) -> Option<TemporaryFileEntry> {
+        items_counter.fetch_add(1, Ordering::Relaxed);
+
+        let current_file_name = entry_data.path();
+        if self.common_data.excluded_items.is_excluded(&current_file_name) {
+            return None;
+        }
+
+        let file_name = entry_data.file_name();
+        let file_name_ascii_lowercase = file_name.to_ascii_lowercase();
+        let file_name_lowercase = file_name_ascii_lowercase.to_string_lossy();
+        if !self.params.extensions.iter().any(|f| file_name_lowercase.ends_with(f.as_str())) {
+            return None;
+        }
+
+        let Ok(metadata) = entry_data.metadata() else {
+            return None;
+        };
+
+        // Creating new file entry
+        Some(TemporaryFileEntry {
+            modified_date: get_modified_time(&metadata, warnings, &current_file_name, false),
+            size: metadata.len(),
+            path: current_file_name,
+        })
+    }
+}
+
+#[cfg_attr(target_family = "windows", expect(clippy::needless_pass_by_ref_mut))]
+pub(crate) fn check_folder_children(
+    dir_result: &mut Vec<PathBuf>,
+    warnings: &mut Vec<String>,
+    entry_data: &DirEntry,
+    recursive_search: bool,
+    directories: &Directories,
+    excluded_items: &ExcludedItems,
+) {
+    if !recursive_search {
+        return;
+    }
+
+    let next_item = entry_data.path();
+    if directories.is_excluded_dir(&next_item) {
+        return;
+    }
+
+    if excluded_items.is_excluded(&next_item) {
+        return;
+    }
+
+    #[cfg(target_family = "unix")]
+    if directories.exclude_other_filesystems() {
+        match directories.is_on_other_filesystems(&next_item) {
+            Ok(true) => return,
+            Err(e) => warnings.push(e),
+            _ => (),
+        }
+    }
+
+    #[cfg(target_family = "windows")]
+    let _ = warnings; // Silence unused variable warning on Windows
+
+    dir_result.push(next_item);
+}

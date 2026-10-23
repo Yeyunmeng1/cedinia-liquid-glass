@@ -1,0 +1,45 @@
+use gtk4::prelude::*;
+
+use crate::gui_structs::common_tree_view::SubView;
+use crate::gui_structs::gui_data::GuiData;
+use crate::gui_structs::gui_popovers_sort::GuiSortPopovers;
+use crate::helpers::enums::PopoverTypes;
+
+pub(crate) fn connect_button_sort(gui_data: &GuiData) {
+    let popovers_sort = gui_data.popovers_sort.clone();
+    let gc_buttons_sort = gui_data.bottom_buttons.gc_buttons_sort.clone();
+    let common_tree_views = gui_data.main_notebook.common_tree_views.clone();
+    gc_buttons_sort.connect_pressed(move |_, _, _, _| {
+        show_required_popovers(&popovers_sort, common_tree_views.get_current_subview());
+    });
+}
+
+fn show_required_popovers(popovers_sort: &GuiSortPopovers, sv: &SubView) {
+    let buttons_popover_sort_file_name = popovers_sort.buttons_popover_sort_file_name.clone();
+    let buttons_popover_sort_size = popovers_sort.buttons_popover_sort_size.clone();
+    let buttons_popover_sort_folder_name = popovers_sort.buttons_popover_sort_folder_name.clone();
+    let buttons_popover_sort_full_name = popovers_sort.buttons_popover_sort_full_name.clone();
+    let buttons_popover_sort_selection = popovers_sort.buttons_popover_sort_selection.clone();
+
+    let arr = sv.nb_object.available_modes;
+
+    buttons_popover_sort_full_name.set_visible(false);
+
+    if arr.contains(&PopoverTypes::All) {
+        buttons_popover_sort_selection.set_visible(true);
+        buttons_popover_sort_file_name.set_visible(true);
+        buttons_popover_sort_folder_name.set_visible(true);
+        // buttons_popover_sort_full_name.set_visible(true); // TODO, this needs to be handled a little different
+    } else {
+        buttons_popover_sort_selection.set_visible(false);
+        buttons_popover_sort_file_name.set_visible(false);
+        buttons_popover_sort_folder_name.set_visible(false);
+        // buttons_popover_sort_full_name.set_visible(false);
+    }
+
+    if arr.contains(&PopoverTypes::Size) {
+        buttons_popover_sort_size.set_visible(true);
+    } else {
+        buttons_popover_sort_size.set_visible(false);
+    }
+}

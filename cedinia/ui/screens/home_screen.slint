@@ -1,0 +1,350 @@
+// 液态玻璃首页
+//
+// 结构修复（v2）：
+//   ToolRow 原来把"按压高亮"矩形写在最前面，Slint 会当成组件根节点，
+//   于是 parent.height 指到外层容器高度，高亮块高度算错。
+//   现在每个 ToolRow 与卡片都有显式的铺满根节点。
+//
+// 功能完全不变：点击仍写 active_tool / last_scan_tool 并触发 tool_changed。
+
+import { Fonts } from "../globals/fonts.slint";
+import { CediniaColors } from "../globals/colors.slint";
+import { ActiveTool } from "../globals/common.slint";
+import { AppState } from "../globals/app_state.slint";
+import { Translations } from "../globals/translations.slint";
+
+component ToolRow {
+    in property <image>      icon;
+    in property <string>     title;
+    in property <string>     description;
+    in property <ActiveTool> tool;
+    in property <color>      tint: CediniaColors.accent;
+    in property <bool>       is_last: false;
+
+    height: 56px;
+
+    // 显式根节点
+    Rectangle {
+        width: root.width;
+        height: root.height;
+
+        // 按压高亮
+        Rectangle {
+            x: 8px;
+            y: 3px;
+            width: parent.width - 16px;
+            height: parent.height - 6px;
+            border-radius: 16px;
+            background: CediniaColors.fill_tertiary;
+            opacity: ta.pressed ? 1.0 : 0.0;
+            animate opacity { duration: 180ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
+        }
+
+        ta := TouchArea {
+            clicked => {
+                AppState.active_tool    = root.tool;
+                AppState.last_scan_tool = root.tool;
+                AppState.tool_changed(root.tool);
+            }
+        }
+
+        HorizontalLayout {
+            // 不要 alignment：它作用于水平主轴，会让整行居中，文字长短不同时图标 x 会漂移。
+            padding-left: 12px;
+            padding-right: 12px;
+            spacing: 14px;
+
+            // 34×34 实心色块 + 白色线性 glyph（iOS App Icon 的观感）
+            Rectangle {
+                width: 40px;
+                height: 40px;
+                y: 8px;
+                border-radius: 12px;
+                background: root.tint.with-alpha(0.13);
+                border-width: 1px;
+                border-color: root.tint.with-alpha(0.16);
+
+                Image {
+                    source: root.icon;
+                    width: 22px;
+                    height: 22px;
+                    // 淡色底 + 深色线稿：比彩色糖果克制得多
+                    colorize: root.tint.darker(0.45);
+                    // 左对齐：与 PNG 内的左对齐配合，保证每行图标落在同一条竖线上
+                    x: 9px;
+                    y: (parent.height - self.height) / 2;
+                    horizontal-alignment: ImageHorizontalAlignment.center;
+                    vertical-alignment: ImageVerticalAlignment.center;
+                }
+            }
+
+            VerticalLayout {
+                alignment: LayoutAlignment.center;
+                spacing: 2px;
+                horizontal-stretch: 1.0;
+
+                Text {
+                    text: root.title;
+                    color: CediniaColors.text_primary;
+                    font-size: Fonts.body;
+                    font-weight: Fonts.regular;
+                    overflow: elide;
+                    wrap: no-wrap;
+                }
+                Text {
+                    text: root.description;
+                    color: CediniaColors.text_secondary;
+                    font-size: Fonts.footnote;
+                    overflow: elide;
+                    wrap: no-wrap;
+                }
+            }
+
+            Text {
+                text: "›";
+                color: CediniaColors.chevron;
+                font-size: 20px;
+                vertical-alignment: TextVerticalAlignment.center;
+                horizontal-alignment: TextHorizontalAlignment.center;
+                width: 12px;
+            }
+        }
+
+        if !root.is_last : Rectangle {
+            y: parent.height - 1px;
+            x: 66px;
+            width: parent.width - 66px - 12px;
+            height: 1px;
+            background: CediniaColors.separator_inset;
+        }
+    }
+}
+
+component GroupTitle {
+    in property <string> text;
+
+    height: 28px;
+
+    HorizontalLayout {
+        padding-left: 22px;
+        padding-right: 18px;
+        alignment: LayoutAlignment.start;
+        Text {
+            text: root.text;
+            color: CediniaColors.text_secondary;
+            font-size: Fonts.footnote;
+            font-weight: Fonts.semibold;
+            vertical-alignment: TextVerticalAlignment.center;
+        }
+    }
+}
+
+export component HomeScreen {
+    // 进场动画默认关闭：初始 opacity 0 会让卡片在首帧完全不可见
+    property <float> reveal: 1.0;
+
+    // 根节点必须显式吃满父容器；否则 preferred-height 由内容撑开，
+    // 会把底部的标签栏挤出屏幕（实测底栏只剩 34px）
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: CediniaColors.bg_primary;
+
+        // ── 底层光晕 ──
+        Rectangle {
+            x: -140px;
+            y: -160px + flick.viewport-y * 0.10;
+            width: 460px;
+            height: 460px;
+            border-radius: 230px;
+            background: @radial-gradient(circle, CediniaColors.glow_blue, transparent);
+        }
+        Rectangle {
+            x: parent.width - 220px;
+            y: 200px - flick.viewport-y * 0.06;
+            width: 400px;
+            height: 400px;
+            border-radius: 200px;
+            background: @radial-gradient(circle, CediniaColors.glow_violet, transparent);
+        }
+        Rectangle {
+            x: 20px;
+            y: parent.height - 260px + flick.viewport-y * 0.04;
+            width: 340px;
+            height: 340px;
+            border-radius: 170px;
+            background: @radial-gradient(circle, CediniaColors.glow_mint, transparent);
+        }
+
+        flick := Flickable {
+            // 父级是普通 Rectangle（不是布局），stretch 无效，必须显式给尺寸，
+            // 否则 Flickable 会按内容尺寸定位，导致内容偏右 / 顶部留白
+            width: parent.width;
+            height: parent.height;
+            // 关键：不给 content 高度，Flickable 会把内容压缩到视口高度，
+            // 三组卡片会被压成原来的三分之一（实测每组只剩 ~83px 而不是 276px）
+
+            content := VerticalLayout {
+                width: parent.width;
+                // 内容总高 = 3 组 x (标题30 + 卡片276) + 组间28x2 + 上下内边距44
+                height: 900px;
+                padding-left: 12px;
+                padding-right: 12px;
+                padding-top: 4px;
+                padding-bottom: 40px;
+                spacing: 0px;
+
+                // ═══ 第一组：照片与视频 ═══
+                GroupTitle { text: "照片与视频"; }
+
+                Rectangle {
+                    border-radius: 18px;
+                    background: CediniaColors.card_solid;
+                    drop-shadow-blur: 20px;
+                    drop-shadow-offset-y: 6px;
+                    drop-shadow-color: CediniaColors.shadow_md;
+                    height: 236px;
+                    opacity: min(root.reveal * 1.8, 1.0);
+
+
+                    g1 := VerticalLayout {
+                        spacing: 0px;
+                        padding: 4px;
+
+                        ToolRow {
+                            icon: @image-url("../../icons/tool_dup.png");
+                            title: Translations.tool_duplicate_files_text;
+                            description: Translations.home_dup_description_text;
+                            tool: ActiveTool.DuplicateFiles;
+                            tint: CediniaColors.tool_duplicates;
+                        }
+                        ToolRow {
+                            icon: @image-url("../../icons/tool_image.png");
+                            title: Translations.tool_similar_images_text;
+                            description: Translations.home_similar_images_description_text;
+                            tool: ActiveTool.SimilarImages;
+                            tint: CediniaColors.tool_similar_imgs;
+                        }
+                        ToolRow {
+                            icon: @image-url("../../icons/tool_video.png");
+                            title: Translations.tool_similar_videos_text;
+                            description: Translations.home_similar_videos_description_text;
+                            tool: ActiveTool.SimilarVideos;
+                            tint: CediniaColors.tool_similar_videos;
+                        }
+                        ToolRow {
+                            icon: @image-url("../../icons/tool_exif.png");
+                            title: Translations.tool_exif_remover_text;
+                            description: Translations.home_exif_description_text;
+                            tool: ActiveTool.ExifRemover;
+                            tint: CediniaColors.tool_exif;
+                            is_last: true;
+                        }
+                    }
+                }
+
+                Rectangle { height: 28px; }
+
+                // ═══ 第二组：清理空间 ═══
+                GroupTitle { text: "清理空间"; }
+
+                Rectangle {
+                    border-radius: 18px;
+                    background: CediniaColors.card_solid;
+                    drop-shadow-blur: 20px;
+                    drop-shadow-offset-y: 6px;
+                    drop-shadow-color: CediniaColors.shadow_md;
+                    height: 236px;
+                    opacity: min(max(root.reveal * 1.8 - 0.45, 0.0), 1.0);
+
+
+                    g2 := VerticalLayout {
+                        spacing: 0px;
+                        padding: 4px;
+
+                        ToolRow {
+                            icon: @image-url("../../icons/tool_folder_empty.png");
+                            title: Translations.tool_empty_folders_text;
+                            description: Translations.home_empty_folders_description_text;
+                            tool: ActiveTool.EmptyFolders;
+                            tint: CediniaColors.tool_empty_folders;
+                        }
+                        ToolRow {
+                            icon: @image-url("../../icons/tool_file_empty.png");
+                            title: Translations.tool_empty_files_text;
+                            description: Translations.home_empty_files_description_text;
+                            tool: ActiveTool.EmptyFiles;
+                            tint: CediniaColors.tool_empty_files;
+                        }
+                        ToolRow {
+                            icon: @image-url("../../icons/tool_trash.png");
+                            title: Translations.tool_temporary_files_text;
+                            description: Translations.home_temp_files_description_text;
+                            tool: ActiveTool.TemporaryFiles;
+                            tint: CediniaColors.tool_temp_files;
+                        }
+                        ToolRow {
+                            icon: @image-url("../../icons/tool_big.png");
+                            title: Translations.tool_big_files_text;
+                            description: Translations.home_big_files_description_text;
+                            tool: ActiveTool.BigFiles;
+                            tint: CediniaColors.tool_big_files;
+                            is_last: true;
+                        }
+                    }
+                }
+
+                Rectangle { height: 28px; }
+
+                // ═══ 第三组：修复与整理 ═══
+                GroupTitle { text: "修复与整理"; }
+
+                Rectangle {
+                    border-radius: 18px;
+                    background: CediniaColors.card_solid;
+                    drop-shadow-blur: 20px;
+                    drop-shadow-offset-y: 6px;
+                    drop-shadow-color: CediniaColors.shadow_md;
+                    height: 236px;
+                    opacity: min(max(root.reveal * 1.8 - 0.9, 0.0), 1.0);
+
+
+                    g3 := VerticalLayout {
+                        spacing: 0px;
+                        padding: 4px;
+
+                        ToolRow {
+                            icon: @image-url("../../icons/tool_broken.png");
+                            title: Translations.tool_broken_files_text;
+                            description: Translations.home_broken_files_description_text;
+                            tool: ActiveTool.BrokenFiles;
+                            tint: CediniaColors.tool_broken_files;
+                        }
+                        ToolRow {
+                            icon: @image-url("../../icons/tool_tag.png");
+                            title: Translations.tool_bad_extensions_text;
+                            description: Translations.home_bad_extensions_description_text;
+                            tool: ActiveTool.BadExtensions;
+                            tint: CediniaColors.tool_bad_ext;
+                        }
+                        ToolRow {
+                            icon: @image-url("../../icons/tool_pencil.png");
+                            title: Translations.tool_bad_names_text;
+                            description: Translations.home_bad_names_description_text;
+                            tool: ActiveTool.BadNames;
+                            tint: CediniaColors.tool_bad_names;
+                        }
+                        ToolRow {
+                            icon: @image-url("../../icons/tool_music.png");
+                            title: Translations.tool_same_music_text;
+                            description: Translations.home_same_music_description_text;
+                            tool: ActiveTool.SameMusic;
+                            tint: CediniaColors.tool_same_music;
+                            is_last: true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

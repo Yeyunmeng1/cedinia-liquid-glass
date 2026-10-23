@@ -1,0 +1,47 @@
+// 液态玻璃版的字号与节奏
+//
+// 与 iOS 版差异：
+//  · 行高 60 → 68（玻璃卡片更"松"，挤在一起会失去悬浮感）
+//  · 圆角更大（卡片 26、图标 11），配合半透明材质
+//  · 字号梯度不变（HIG 17px Body 基线）
+
+export global Fonts {
+    // 保留原有 token 名
+    out property <length> micro: 11px;
+    out property <length> caption: 13px;
+    out property <length> body: 15px;
+    out property <length> body_lg: 16px;
+    out property <length> subtitle: 17px;
+    out property <length> label_lg: 17px;
+    out property <length> title: 20px;
+    out property <length> title_lg: 22px;
+    out property <length> display_sm: 24px;
+    out property <length> display: 28px;
+    out property <length> display_lg: 34px;
+    out property <length> display_xl: 56px;
+
+    out property <int> regular: 400;
+    out property <int> medium: 500;
+    out property <int> semibold: 600;
+    out property <int> bold: 700;
+
+    // 语义字号
+    out property <length> large_title: 34px;
+    out property <length> title_1: 28px;
+    out property <length> title_2: 22px;
+    out property <length> title_3: 20px;
+    out property <length> headline: 17px;
+    out property <length> subhead: 15px;
+    out property <length> footnote: 13px;
+    out property <length> caption_1: 12px;
+    out property <length> caption_2: 11px;
+
+    // 节奏
+    out property <length> row_height: 68px;
+    out property <length> row_height_compact: 52px;
+    out property <length> nav_height: 52px;
+    out property <length> tab_height: 56px;
+    out property <length> group_gap: 18px;
+    out property <length> group_title_gap: 10px;
+    out property <length> screen_pad: 18px;
+}

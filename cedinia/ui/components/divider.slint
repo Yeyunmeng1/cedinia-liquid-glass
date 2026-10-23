@@ -1,0 +1,22 @@
+// 液态玻璃下的分隔线
+//
+// 玻璃材质本身有光影层次，再加实体分割线会显脏。
+// 所以这里的"线"只保留一点点：透明度压到 5% 左右，仅用来暗示行的边界。
+// 需要更干净时把 line_color 设为 transparent 即可。
+
+import { CediniaColors } from "../globals/colors.slint";
+
+export component Divider {
+    in property <length> inset-left: 56px;
+    in property <length> inset-right: 16px;
+    in property <color>  line_color: CediniaColors.separator_inset;
+
+    height: 1px;
+
+    Rectangle {
+        x: root.inset-left;
+        width: max(parent.width - root.inset-left - root.inset-right, 0px);
+        height: 1px;
+        background: root.line_color;
+    }
+}

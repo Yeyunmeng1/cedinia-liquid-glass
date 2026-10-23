@@ -1,0 +1,189 @@
+// 底部标签栏 —— 玻璃 + 滑动高亮（对齐 tokens.css 的 .glass）
+//
+// 玻璃的三层（缺一层就变塑料）：
+//   1. 半透明底 rgba(252,252,254,.72)
+//   2. 顶部 0.5px 硬高光 + 1px 内描边
+//   3. 顶部一条渐变过渡带，模拟浮在内容之上的边界
+//
+// 选中态：一枚独立滑块，x 随槽位移动，spring 曲线（0.32,0.72,0,1）
+
+import { Fonts } from "../globals/fonts.slint";
+import { CediniaColors } from "../globals/colors.slint";
+import { ActiveTool } from "../globals/common.slint";
+import { AppState } from "../globals/app_state.slint";
+import { Translations } from "../globals/translations.slint";
+
+component NavCell {
+    in property <image>  icon;
+    in property <string> label;
+    in property <bool>   active;
+    callback tap();
+
+    x: 0px;
+    y: 0px;
+    width: 96px;
+    height: 68px;
+
+    t := TouchArea {
+        clicked => { root.tap(); }
+    }
+
+    Image {
+        source: root.icon;
+        width: 24px;
+        height: 24px;
+        x: (parent.width - self.width) / 2;
+        y: 11px;
+        colorize: root.active ? CediniaColors.nav_active : CediniaColors.nav_inactive;
+        animate colorize { duration: 200ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
+    }
+
+    Text {
+        text: root.label;
+        color: root.active ? CediniaColors.nav_active : CediniaColors.nav_inactive;
+        font-size: 10px;
+        font-weight: Fonts.medium;
+        x: 2px;
+        y: 38px;
+        width: parent.width - 4px;
+        height: 14px;
+        horizontal-alignment: TextHorizontalAlignment.center;
+        overflow: elide;
+        animate color { duration: 200ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
+    }
+}
+
+export component BottomNavBar {
+    height: 68px;
+    horizontal-stretch: 1.0;
+
+    property <int> active_idx:
+        AppState.active_tool == ActiveTool.Home ? 0
+      : AppState.active_tool == AppState.last_scan_tool ? 1
+      : AppState.active_tool == ActiveTool.Directories ? 2
+      : AppState.active_tool == ActiveTool.Settings ? 3
+      : 0;
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: CediniaColors.nav_bg;
+
+
+        // ── 玻璃描边环（对应 .glass::before 的 135° 渐变：左上亮→中间暗→右下亮）──
+        Rectangle {   // 顶边：左亮右暗
+            x: 0; y: 0;
+            width: parent.width; height: 1px;
+            background: @linear-gradient(90deg, #ffffffe6 0%, #ffffff24 100%);
+        }
+        Rectangle {   // 底边：左暗右亮
+            x: 0; y: parent.height - 1px;
+            width: parent.width; height: 1px;
+            background: @linear-gradient(90deg, #ffffff24 0%, #ffffff8c 100%);
+        }
+        Rectangle {   // 左边：上亮下暗
+            x: 0; y: 0;
+            width: 1px; height: parent.height;
+            background: @linear-gradient(180deg, #ffffffe6 0%, #ffffff24 100%);
+        }
+        Rectangle {   // 右边：上暗下亮
+            x: parent.width - 1px; y: 0;
+            width: 1px; height: parent.height;
+            background: @linear-gradient(180deg, #ffffff24 0%, #ffffff8c 100%);
+        }
+
+        // 顶部渐变过渡带
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: 18px;
+            background: @linear-gradient(180deg, CediniaColors.glass_top_glint 0%, transparent 100%);
+        }
+
+        // 选中滑块：x 随槽位移动
+        Rectangle {
+            x: root.active_idx * (parent.width / 4) + 8px;
+            y: 8px;
+            width: parent.width / 4 - 16px;
+            height: 52px;
+            border-radius: 14px;
+            background: CediniaColors.accent.with-alpha(0.13);
+            border-width: 1px;
+            border-color: CediniaColors.accent.with-alpha(0.10);
+            animate x { duration: 320ms; easing: cubic-bezier(0.32, 0.72, 0, 1); }
+            animate width { duration: 320ms; easing: cubic-bezier(0.32, 0.72, 0, 1); }
+        }
+
+        NavCell {
+            x: 0px;
+            width: parent.width / 4;
+            icon: @image-url("../../icons/nav_home.png");
+            label: Translations.nav_home_text;
+            active: AppState.active_tool == ActiveTool.Home;
+            tap => {
+                if AppState.active_tool != ActiveTool.Home {
+                    AppState.active_tool = ActiveTool.Home;
+                    AppState.tool_changed(ActiveTool.Home);
+                }
+            }
+        }
+
+        NavCell {
+            x: parent.width / 4;
+            width: parent.width / 4;
+            icon: AppState.last_scan_tool == ActiveTool.SimilarImages
+                ? @image-url("../../icons/nav_image.png")
+                : AppState.last_scan_tool == ActiveTool.EmptyFolders
+                    ? @image-url("../../icons/nav_folder.png")
+                    : @image-url("../../icons/nav_dup.png");
+            label: AppState.last_scan_tool == ActiveTool.DuplicateFiles   ? Translations.tool_duplicate_files_text
+                 : AppState.last_scan_tool == ActiveTool.EmptyFolders     ? Translations.tool_empty_folders_text
+                 : AppState.last_scan_tool == ActiveTool.SimilarImages    ? Translations.tool_similar_images_text
+                 : AppState.last_scan_tool == ActiveTool.EmptyFiles       ? Translations.tool_empty_files_text
+                 : AppState.last_scan_tool == ActiveTool.TemporaryFiles   ? Translations.tool_temporary_files_text
+                 : AppState.last_scan_tool == ActiveTool.BigFiles         ? Translations.tool_big_files_text
+                 : AppState.last_scan_tool == ActiveTool.BrokenFiles      ? Translations.tool_broken_files_text
+                 : AppState.last_scan_tool == ActiveTool.BadExtensions    ? Translations.tool_bad_extensions_text
+                 : AppState.last_scan_tool == ActiveTool.SameMusic        ? Translations.tool_same_music_text
+                 : AppState.last_scan_tool == ActiveTool.BadNames         ? Translations.tool_bad_names_text
+                 : AppState.last_scan_tool == ActiveTool.ExifRemover      ? Translations.tool_exif_remover_text
+                 : "Cedinia";
+            active: AppState.active_tool == AppState.last_scan_tool;
+            tap => {
+                if AppState.active_tool != AppState.last_scan_tool {
+                    AppState.active_tool = AppState.last_scan_tool;
+                    AppState.tool_changed(AppState.last_scan_tool);
+                }
+            }
+        }
+
+        NavCell {
+            x: parent.width / 2;
+            width: parent.width / 4;
+            icon: @image-url("../../icons/nav_folder.png");
+            label: Translations.nav_dirs_text;
+            active: AppState.active_tool == ActiveTool.Directories;
+            tap => {
+                if AppState.active_tool != ActiveTool.Directories {
+                    AppState.active_tool = ActiveTool.Directories;
+                    AppState.tool_changed(ActiveTool.Directories);
+                }
+            }
+        }
+
+        NavCell {
+            x: parent.width * 3 / 4;
+            width: parent.width / 4;
+            icon: @image-url("../../icons/nav_gear.png");
+            label: Translations.nav_settings_text;
+            active: AppState.active_tool == ActiveTool.Settings;
+            tap => {
+                if AppState.active_tool != ActiveTool.Settings {
+                    AppState.active_tool = ActiveTool.Settings;
+                    AppState.tool_changed(ActiveTool.Settings);
+                }
+            }
+        }
+    }
+}

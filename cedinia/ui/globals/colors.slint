@@ -1,0 +1,127 @@
+// Apple 语义色 —— 直接对齐 liquid-glass-demo/assets/tokens.css 的取值
+//
+// 关键约定（来自参考实现）：
+//   · 分组背景灰 #F2F2F7，卡片纯白 #FFFFFF —— 灰底白卡是 Apple 的招牌反向
+//   · 玻璃 rgba(252,252,254,0.72)，只出现在功能层（导航栏 / 标签栏 / 浮层）
+//   · 分隔线 0.5px @ rgba(60,60,67,0.13)，不是 1px 实线
+//   · 卡片阴影 0 1px 2px .05 + 0 6px 20px .045（两层，极淡）
+//   · 圆角：panel 22 / card 18 / row 12 / ctrl 10
+
+import { GeneralSettings } from "app_state.slint";
+
+export global CediniaColors {
+
+    // ── 背景与表面 ───────────────────────────────────────────
+    out property <color> bg_primary:  GeneralSettings.use_dark_theme ? #131316 : #f2f2f7;  // ground
+    out property <color> bg_surface:  GeneralSettings.use_dark_theme ? #1d1d20 : #ffffff;  // surface
+    out property <color> bg_elevated: GeneralSettings.use_dark_theme ? #26262a : #ffffff;
+    out property <color> bg_card:     GeneralSettings.use_dark_theme ? #1d1d20 : #ffffff;
+    out property <color> card_solid:  GeneralSettings.use_dark_theme ? #1d1d20 : #ffffff;
+
+    // ── 玻璃（仅功能层）──────────────────────────────────────
+    out property <color> glass_fill:      GeneralSettings.use_dark_theme ? #26262ab8 : #fcfcfeb8;  // 72%
+    out property <color> glass_fill_deep: GeneralSettings.use_dark_theme ? #202024f0 : #fcfcfef0;  // 94%
+    out property <color> glass_stroke:    GeneralSettings.use_dark_theme ? #ffffff38 : #ffffffd9;  // rim 85%
+    out property <color> glass_top_glint: GeneralSettings.use_dark_theme ? #ffffff26 : #ffffff4d;  // sheen 30%
+    out property <color> glass_bottom_glint: #00000000;
+
+    // ── 环境光（参考实现的两团，alpha 极低）──────────────────
+    out property <color> glow_blue:   GeneralSettings.use_dark_theme ? #0088ff21 : #0088ff1a;  // 10%
+    out property <color> glow_violet: GeneralSettings.use_dark_theme ? #6155f51f : #6155f517;  // 9%
+    out property <color> glow_mint:   GeneralSettings.use_dark_theme ? #30d15814 : #30d15810;
+
+    // ── 强调色（参考实现 --tint）─────────────────────────────
+    out property <color> accent:       GeneralSettings.use_dark_theme ? #4da3ff : #0088ff;
+    out property <color> accent_light: GeneralSettings.use_dark_theme ? #7cbbff : #006fd6;
+    out property <color> accent_muted: GeneralSettings.use_dark_theme ? #4da3ff2e : #0088ff1f;
+
+    // ── 文字（Apple 四级 label）──────────────────────────────
+    out property <color> text_primary:   GeneralSettings.use_dark_theme ? #f5f5f7 : #1d1d1f;
+    out property <color> text_secondary: GeneralSettings.use_dark_theme ? #9b9ba1 : #6e6e73;
+    out property <color> text_disabled:  GeneralSettings.use_dark_theme ? #79797f : #b0b0b6;
+
+    // ── 语义色（参考实现 sys-*）──────────────────────────────
+    out property <color> success: GeneralSettings.use_dark_theme ? #30d158 : #34c759;
+    out property <color> warning: GeneralSettings.use_dark_theme ? #ff9230 : #ff8d28;
+    out property <color> danger:  GeneralSettings.use_dark_theme ? #ff4245 : #ff383c;
+
+    // ── 分隔与填充 ───────────────────────────────────────────
+    out property <color> divider: GeneralSettings.use_dark_theme ? #ffffff1c : #3c3c4321;  // 13%
+    out property <color> border:  GeneralSettings.use_dark_theme ? #ffffff1a : #0000000f;
+    out property <color> ripple:  GeneralSettings.use_dark_theme ? #7878803d : #7878801f;
+
+    // ── 列表行 ───────────────────────────────────────────────
+    out property <color> row_normal:   #00000000;
+    out property <color> row_alt:      #00000000;
+    out property <color> row_selected: GeneralSettings.use_dark_theme ? #4da3ff2b : #0088ff14;
+    out property <color> row_header:   #00000000;
+
+    // ── 导航 / 标签栏 ────────────────────────────────────────
+    out property <color> nav_bg:       GeneralSettings.use_dark_theme ? #26262ab8 : #fcfcfeb8;
+    out property <color> nav_active:   GeneralSettings.use_dark_theme ? #4da3ff : #0088ff;
+    out property <color> nav_inactive: GeneralSettings.use_dark_theme ? #79797f : #8e8e93;
+
+    // ── 按钮前景 ─────────────────────────────────────────────
+    out property <color> fg_on_accent:          #ffffff;
+    out property <color> fg_on_accent_disabled: #ffffff80;
+    out property <color> fg_on_danger:          #ffffff;
+
+    // ── 遮罩 ─────────────────────────────────────────────────
+    out property <color> scrim:        #00000059;
+    out property <color> scrim_strong: #0000008c;
+
+    // ── 阴影（参考实现的两层极淡投影）────────────────────────
+    out property <color> shadow_sm: GeneralSettings.use_dark_theme ? #00000059 : #0000000d;
+    out property <color> shadow_md: GeneralSettings.use_dark_theme ? #00000073 : #0000000b;
+    out property <color> shadow_lg: GeneralSettings.use_dark_theme ? #0000008c : #00000014;
+    out property <color> shadow_xl: GeneralSettings.use_dark_theme ? #000000a6 : #0000001f;
+
+    // ── 图片查看器 ───────────────────────────────────────────
+    out property <color> image_viewer_bg: #000000;
+    out property <color> split_line:      #ffffffaa;
+    out property <color> tile_press:      #ffffff1a;
+
+    // ── 对比视图 ─────────────────────────────────────────────
+    out property <color> compare_close_bg:       #3a3a3c;
+    out property <color> compare_close_bg_hover: #48484a;
+    out property <color> compare_close_icon:     #ffffff;
+    out property <color> compare_right_mark:     #ff8d28;
+    out property <color> compare_warn_banner:    #ff8d2833;
+    out property <color> compare_diff_bg:        #000000;
+
+    // ── 组件常量 ─────────────────────────────────────────────
+    out property <color> toggle_knob:      #ffffff;
+    out property <color> reference_border: #0088ff;
+
+    out property <float> tool_icon_circle_alpha: 0.13;
+
+    // ── 工具专属色（参考实现 sys-* 调色板）──────────────────
+    out property <color> tool_empty_folders:  #ff8d28;
+    out property <color> tool_similar_imgs:   #cb30e0;
+    out property <color> tool_empty_files:    #8e8e93;
+    out property <color> tool_temp_files:     #a2845e;
+    out property <color> tool_big_files:      #ff383c;
+    out property <color> tool_broken_files:   #ff2d55;
+    out property <color> tool_bad_ext:        #00c3d0;
+    out property <color> tool_same_music:     #6155f5;
+    out property <color> tool_bad_names:      #ff8d28;
+    out property <color> tool_exif:           #00c3d0;
+    out property <color> tool_similar_videos: #34c759;
+    out property <color> tool_duplicates:     #0088ff;
+
+    // ── 扩展 token ───────────────────────────────────────────
+    out property <color> separator_inset: GeneralSettings.use_dark_theme ? #ffffff1c : #3c3c4321;
+    out property <color> chevron:         GeneralSettings.use_dark_theme ? #79797f : #b0b0b6;
+    out property <color> fill_secondary:  GeneralSettings.use_dark_theme ? #7878803d : #7878801f;
+    out property <color> fill_tertiary:   GeneralSettings.use_dark_theme ? #78788029 : #78788014;
+    out property <color> bar_border:      GeneralSettings.use_dark_theme ? #ffffff1c : #0000000f;
+
+    // ── 圆角与节奏（参考实现档位）────────────────────────────
+    out property <length> radius_panel: 22px;
+    out property <length> radius_card:  18px;
+    out property <length> radius_row:   12px;
+    out property <length> radius_icon:  10px;
+    out property <length> radius_pill:  999px;
+    out property <duration> ease_fluid: 320ms;
+    out property <duration> ease_tap:   200ms;
+}

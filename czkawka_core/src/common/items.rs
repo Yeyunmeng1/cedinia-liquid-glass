@@ -1,0 +1,242 @@
+use std::path::Path;
+
+use crate::common::regex_check;
+use crate::flc;
+use crate::helpers::messages::Messages;
+
+#[cfg(target_family = "unix")]
+pub const DEFAULT_EXCLUDED_DIRECTORIES: &[&str] = &["/proc", "/dev", "/sys", "/snap"];
+#[cfg(not(target_family = "unix"))]
+pub const DEFAULT_EXCLUDED_DIRECTORIES: &[&str] = &["C:\\Windows"];
+
+#[cfg(all(target_family = "unix", target_os = "macos"))]
+pub const DEFAULT_EXCLUDED_ITEMS: &str = "*/.git/*,*/node_modules/*,*/lost+found/*,*/Trash/*,*/.Trash-*/*,/Users/*/Library/Caches/*";
+
+#[cfg(all(target_family = "unix", not(target_os = "macos")))]
+pub const DEFAULT_EXCLUDED_ITEMS: &str = "*/.git/*,*/node_modules/*,*/lost+found/*,*/Trash/*,*/.Trash-*/*,*/snap/*,/home/*/.cache/*,/home/*/.var/app/,/home/*/.*";
+
+#[cfg(not(target_family = "unix"))]
+pub const DEFAULT_EXCLUDED_ITEMS: &str = "*\\.git\\*,*\\node_modules\\*,*\\lost+found\\*,*:\\windows\\*,*:\\$RECYCLE.BIN\\*,*:\\$SysReset\\*,*:\\System Volume Information\\*,*:\\OneDriveTemp\\*,*:\\hiberfil.sys,*:\\pagefile.sys,*:\\swapfile.sys,*:\\Users\\*\\AppData";
+
+#[cfg(all(target_family = "unix", target_os = "macos"))]
+pub const TRASH_EXCLUDED_ITEMS: &str = "*/Trash/*,*/.Trash-*/*";
+#[cfg(all(target_family = "unix", not(target_os = "macos")))]
+pub const TRASH_EXCLUDED_ITEMS: &str = "*/Trash/*,*/.Trash-*/*";
+#[cfg(not(target_family = "unix"))]
+pub const TRASH_EXCLUDED_ITEMS: &str = "*:\\$RECYCLE.BIN\\*";
+
+#[derive(Debug, Clone, Default)]
+pub struct ExcludedItems {
+    expressions: Vec<String>,
+    connected_expressions: Vec<SingleExcludedItem>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SingleExcludedItem {
+    pub expression: String,
+    pub expression_splits: Vec<String>,
+    pub unique_extensions_splits: Vec<String>,
+}
+
+impl ExcludedItems {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn new_from(excluded_items: Vec<String>) -> Self {
+        let mut s = Self::new();
+        s.set_excluded_items(excluded_items);
+        s
+    }
+
+    pub(crate) fn set_excluded_items(&mut self, excluded_items: Vec<String>) -> Messages {
+        let mut warnings: Vec<String> = Vec::new();
+        if excluded_items.is_empty() {
+            return Messages::new();
+        }
+
+        let expressions: Vec<String> = excluded_items;
+        let mut checked_expressions: Vec<String> = Vec::new();
+
+        for expression in expressions {
+            let expression: String = expression.trim().to_string();
+
+            if expression.is_empty() {
+                continue;
+            }
+
+            #[cfg(target_family = "windows")]
+            let expression = expression.replace("/", "\\");
+
+            if expression == "DEFAULT" {
+                push_preset_items(&mut checked_expressions, DEFAULT_EXCLUDED_ITEMS);
+                continue;
+            }
+            if expression == "$TRASH" {
+                push_preset_items(&mut checked_expressions, TRASH_EXCLUDED_ITEMS);
+                continue;
+            }
+            if !expression.contains('*') {
+                warnings.push(flc!("core_excluded_items_wildcard_required", expression = expression.clone()));
+                continue;
+            }
+
+            // On Windows the scanned path is lowercased before matching (see `normalize_windows_path`),
+            // so the expression must be lowercased too, otherwise patterns with uppercase letters never match.
+            #[cfg(target_family = "windows")]
+            let expression = expression.to_ascii_lowercase();
+
+            checked_expressions.push(expression);
+        }
+
+        for checked_expression in &checked_expressions {
+            let item = new_excluded_item(checked_expression);
+            self.expressions.push(item.expression.clone());
+            self.connected_expressions.push(item);
+        }
+        Messages {
+            critical: None,
+            messages: Vec::new(),
+            warnings,
+            errors: Vec::new(),
+        }
+    }
+
+    pub(crate) fn get_excluded_items(&self) -> &Vec<String> {
+        &self.expressions
+    }
+    pub(crate) fn is_excluded(&self, path: &Path) -> bool {
+        if self.connected_expressions.is_empty() {
+            return false;
+        }
+        #[cfg(target_family = "windows")]
+        let path = crate::common::normalize_windows_path(path);
+
+        let path_str = path.to_string_lossy();
+
+        for expression in &self.connected_expressions {
+            if regex_check(expression, &path_str) {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+fn push_preset_items(checked_expressions: &mut Vec<String>, preset: &str) {
+    for item in preset.split(',') {
+        let item = item.trim();
+        if !item.is_empty() {
+            #[cfg(not(target_family = "windows"))]
+            checked_expressions.push(item.to_string());
+            // On Windows, scanned paths are lowercased before matching, so patterns
+            // must be lowercased too - including those from the preset sets.
+            #[cfg(target_family = "windows")]
+            checked_expressions.push(item.to_ascii_lowercase());
+        }
+    }
+}
+
+pub fn new_excluded_item(expression: &str) -> SingleExcludedItem {
+    let expression = expression.trim().to_string();
+    let expression_splits: Vec<String> = expression.split('*').filter_map(|e| if e.is_empty() { None } else { Some(e.to_string()) }).collect();
+    let mut unique_extensions_splits = expression_splits.clone();
+    unique_extensions_splits.sort();
+    unique_extensions_splits.dedup();
+    unique_extensions_splits.sort_by_key(|b| std::cmp::Reverse(b.len()));
+    SingleExcludedItem {
+        expression,
+        expression_splits,
+        unique_extensions_splits,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_excluded_items_new_and_basic_operations() {
+        let items = ExcludedItems::new();
+        assert!(items.expressions.is_empty());
+        assert!(items.connected_expressions.is_empty());
+
+        let items = ExcludedItems::new_from(vec!["*/.git/*".to_string(), "*/node_modules/*".to_string()]);
+        assert_eq!(items.expressions.len(), 2);
+        assert_eq!(items.get_excluded_items().len(), 2);
+    }
+
+    #[test]
+    fn test_set_excluded_items_with_default() {
+        let mut items = ExcludedItems::new();
+        let msgs = items.set_excluded_items(vec!["DEFAULT".to_string()]);
+        assert!(msgs.warnings.is_empty());
+        let expected = DEFAULT_EXCLUDED_ITEMS.split(',').filter(|s| !s.trim().is_empty()).count();
+        assert_eq!(items.expressions.len(), expected);
+        assert!(items.expressions.iter().any(|e| e.contains(".git")));
+        assert!(items.expressions.iter().any(|e| e.contains("node_modules")));
+    }
+
+    #[test]
+    fn test_set_excluded_items_with_trash() {
+        let mut items = ExcludedItems::new();
+        let msgs = items.set_excluded_items(vec!["$TRASH".to_string()]);
+        assert!(msgs.warnings.is_empty());
+        let expected = TRASH_EXCLUDED_ITEMS.split(',').filter(|s| !s.trim().is_empty()).count();
+        assert_eq!(items.expressions.len(), expected);
+    }
+
+    #[test]
+    fn test_set_excluded_items_warnings() {
+        let mut items = ExcludedItems::new();
+        let msgs = items.set_excluded_items(vec!["no_wildcard".to_string(), "  ".to_string()]);
+        assert_eq!(msgs.warnings.len(), 1);
+        assert!(msgs.warnings[0].contains("Wildcard * is required"));
+        assert!(items.expressions.is_empty());
+    }
+
+    #[test]
+    fn test_is_excluded() {
+        let mut items = ExcludedItems::new();
+        items.set_excluded_items(vec!["*/.git/*".to_string(), "*/node_modules/*".to_string(), "/home/*/.*".to_string()]);
+
+        assert!(items.is_excluded(Path::new("/home/user/.git/config")));
+        assert!(items.is_excluded(Path::new("/home/user/.abscd/config")));
+        assert!(items.is_excluded(Path::new("/project/node_modules/package.json")));
+        assert!(!items.is_excluded(Path::new("/home/user/file.txt")));
+
+        // Empty items - nothing excluded
+        let items_empty = ExcludedItems::new();
+        assert!(!items_empty.is_excluded(Path::new("/any/path")));
+    }
+
+    #[cfg(target_family = "windows")]
+    #[test]
+    fn test_is_excluded_windows_case_insensitive() {
+        // Regression test for issue #1957: on Windows the scanned path is lowercased before
+        // matching, so an uppercase pattern like `*\TEST\*` must still exclude `...\test\...`.
+        let items = ExcludedItems::new_from(vec!["*\\TEST\\*".to_string()]);
+
+        // Uppercase pattern matches the same-cased and differently-cased path segments.
+        assert!(items.is_excluded(Path::new("C:\\NOT_TEST\\TEST\\file.txt")));
+        assert!(items.is_excluded(Path::new("C:\\Some\\test\\file.txt")));
+        assert!(items.is_excluded(Path::new("C:\\Some\\TeSt\\file.txt")));
+
+        // A path without a `\TEST\` segment must not be excluded.
+        assert!(!items.is_excluded(Path::new("C:\\NOT_TEST\\TEST2\\file.txt")));
+        assert!(!items.is_excluded(Path::new("C:\\root\\file.txt")));
+    }
+
+    #[test]
+    fn test_new_excluded_item() {
+        let item = new_excluded_item("  */test/*.txt  ");
+        assert_eq!(item.expression, "*/test/*.txt");
+        assert_eq!(item.expression_splits, vec!["/test/", ".txt"]);
+        assert_eq!(item.unique_extensions_splits.len(), 2);
+
+        let item2 = new_excluded_item("*abc*def*abc*");
+        assert_eq!(item2.expression_splits, vec!["abc", "def", "abc"]);
+        // unique_extensions_splits should be deduplicated and sorted by length
+        assert_eq!(item2.unique_extensions_splits, vec!["abc", "def"]);
+    }
+}
